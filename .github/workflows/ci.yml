@@ -14,8 +14,8 @@ jobs:
       matrix:
         python-version: ["3.10", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Core tests
@@ -27,8 +27,8 @@ jobs:
     name: Go TUI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: gofmt -l cmd internal | tee /dev/stderr | test -z "$(cat)"
@@ -43,11 +43,11 @@ jobs:
     name: Wheels
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: python -m pip install --upgrade build wheel
@@ -65,7 +65,7 @@ jobs:
           echo "$bin"; case "$bin" in */site-packages/hotseat/_bin/hotseat-tui) ;; *) echo "not the bundled binary"; exit 1;; esac
           "$bin" --version
           "$bin" --render --demo-file "$GITHUB_WORKSPACE/docs/demo-fixture.json" --width 100 --height 24 | head -3
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
