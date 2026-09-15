@@ -1,0 +1,33 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.DS_Store
+
+# Never commit credential material. Nothing here should ever exist in the repo,
+# but these patterns make an accident loud instead of silent.
+*credentials*.json
+.credentials.json
+*.pem
+*.key
+.env
+
+# Locally built Go interface, and the copy staged into platform wheels
+/bin/
+hotseat/_bin/
+
+# Local account/session state must never enter the public repository.
+auth.json
+oauthAccount.json
+.claude/
+.codex/
+.claude-accounts/
+browser-profiles/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.cache/
+build/
+dist/

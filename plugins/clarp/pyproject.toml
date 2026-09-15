@@ -1,0 +1,25 @@
+[project]
+name = "hotseat-clarp"
+version = "0.1.0"
+description = "Optional Clarp agent integration for Hotseat"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Maxteabag" }]
+dependencies = ["hotseat>=0.1.0,<0.2"]
+
+[project.urls]
+Homepage = "https://github.com/Maxteabag/hotseat"
+
+[project.entry-points."hotseat.plugins"]
+clarp = "hotseat_clarp:Plugin"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["hotseat_clarp"]
+
+[tool.setuptools.package-data]
+hotseat_clarp = ["dashboard.js"]

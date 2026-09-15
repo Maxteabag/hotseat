@@ -1,0 +1,308 @@
+{
+ "generated_at": 1789493039.3861783,
+ "sessions": 3,
+ "accounts": [
+  {
+   "provider": "codex",
+   "alias": "work",
+   "email": "dev@example.com",
+   "plan": "Business",
+   "workspace": "Engineering",
+   "active": true,
+   "saved": true,
+   "can_switch": true,
+   "can_launch": true,
+   "checked_at": 1789492999.3861783,
+   "reset_credits": 2,
+   "windows": [
+    {
+     "label": "Codex · weekly",
+     "used": 0.27,
+     "reset": 1789766639.3861783
+    }
+   ]
+  },
+  {
+   "provider": "codex",
+   "alias": "research",
+   "email": "dev@example.com",
+   "plan": "Business",
+   "workspace": "Data Platform",
+   "active": false,
+   "saved": true,
+   "can_switch": true,
+   "can_launch": true,
+   "checked_at": 1789492999.3861783,
+   "reset_credits": 1,
+   "windows": [
+    {
+     "label": "Codex · weekly",
+     "used": 0.61,
+     "reset": 1789766639.3861783
+    }
+   ]
+  },
+  {
+   "provider": "codex",
+   "alias": "personal",
+   "email": "me@example.com",
+   "plan": "Pro",
+   "workspace": "",
+   "active": false,
+   "saved": true,
+   "can_switch": true,
+   "can_launch": true,
+   "checked_at": 1789492999.3861783,
+   "reset_credits": 0,
+   "windows": [
+    {
+     "label": "Codex · weekly",
+     "used": 1.0,
+     "reset": 1789586639.3861783
+    }
+   ]
+  },
+  {
+   "provider": "codex",
+   "alias": "side-project",
+   "email": "side@example.com",
+   "plan": "Plus",
+   "workspace": "",
+   "active": false,
+   "saved": true,
+   "can_switch": true,
+   "can_launch": true,
+   "checked_at": 1789492999.3861783,
+   "reset_credits": 0,
+   "windows": [
+    {
+     "label": "Codex · weekly",
+     "used": 0.08,
+     "reset": 1789993439.3861783
+    }
+   ]
+  },
+  {
+   "provider": "codex",
+   "alias": "legacy",
+   "email": "old@example.com",
+   "plan": "Pro",
+   "workspace": "",
+   "active": false,
+   "saved": true,
+   "can_switch": true,
+   "can_launch": true,
+   "checked_at": 0,
+   "reset_credits": null,
+   "windows": [],
+   "error": "401 token_revoked: The refresh token was revoked. Sign in again.",
+   "reset_credits_error": "401 token_revoked: The refresh token was revoked. Sign in again."
+  },
+  {
+   "provider": "claude",
+   "alias": "studio",
+   "email": "studio@example.com",
+   "plan": "Max 20×",
+   "workspace": "",
+   "active": true,
+   "saved": true,
+   "can_switch": true,
+   "can_launch": true,
+   "checked_at": 1789493014.3861783,
+   "cached": false,
+   "windows": [
+    {
+     "label": "All models · 5-hour",
+     "used": 0.18,
+     "reset": 1789501019.3861783
+    },
+    {
+     "label": "All models · weekly",
+     "used": 0.62,
+     "reset": 1789683839.3861783
+    },
+    {
+     "label": "Fable · weekly",
+     "used": 0.84,
+     "reset": 1789683839.3861783
+    }
+   ],
+   "limited": false
+  },
+  {
+   "provider": "claude",
+   "alias": "team",
+   "email": "dev@example.com",
+   "plan": "Team 5×",
+   "workspace": "Example Org",
+   "active": false,
+   "saved": true,
+   "can_switch": true,
+   "can_launch": true,
+   "checked_at": 1789493014.3861783,
+   "cached": false,
+   "windows": [
+    {
+     "label": "All models · 5-hour",
+     "used": 0.41,
+     "reset": 1789501019.3861783
+    },
+    {
+     "label": "All models · weekly",
+     "used": 0.23,
+     "reset": 1789683839.3861783
+    },
+    {
+     "label": "Fable · weekly",
+     "used": 0.55,
+     "reset": 1789683839.3861783
+    }
+   ],
+   "limited": false
+  },
+  {
+   "provider": "claude",
+   "alias": "personal",
+   "email": "me@example.com",
+   "plan": "Max 5×",
+   "workspace": "",
+   "active": false,
+   "saved": true,
+   "can_switch": true,
+   "can_launch": true,
+   "checked_at": 1789493014.3861783,
+   "cached": false,
+   "windows": [
+    {
+     "label": "All models · 5-hour",
+     "used": 1.0,
+     "reset": 1789501019.3861783
+    },
+    {
+     "label": "All models · weekly",
+     "used": 0.47,
+     "reset": 1789683839.3861783
+    },
+    {
+     "label": "Fable · weekly",
+     "used": 1.0,
+     "reset": 1789683839.3861783
+    }
+   ],
+   "limited": true
+  },
+  {
+   "provider": "claude",
+   "alias": "lab",
+   "email": "lab@example.com",
+   "plan": "Team 5×",
+   "workspace": "Example Org",
+   "active": false,
+   "saved": true,
+   "can_switch": true,
+   "can_launch": true,
+   "checked_at": 1789492379.3861783,
+   "cached": true,
+   "windows": [
+    {
+     "label": "All models · 5-hour",
+     "used": 0.05,
+     "reset": 1789501019.3861783
+    },
+    {
+     "label": "All models · weekly",
+     "used": 0.71,
+     "reset": 1789683839.3861783
+    },
+    {
+     "label": "Fable · weekly",
+     "used": 0.12,
+     "reset": 1789683839.3861783
+    }
+   ],
+   "limited": false
+  },
+  {
+   "provider": "claude",
+   "alias": "archive",
+   "email": "archive@example.com",
+   "plan": "Max 5×",
+   "workspace": "",
+   "active": false,
+   "saved": true,
+   "can_switch": true,
+   "can_launch": true,
+   "checked_at": 0,
+   "cached": false,
+   "windows": [],
+   "error": "HTTP 429: usage lookup throttled"
+  }
+ ],
+ "work": {
+  "items": [
+   {
+    "id": "019a4c1e-7d3b-4f2a-9c1d-3e8f6a2b5c70",
+    "provider": "codex",
+    "title": "Finish the Postgres migration and rerun the integration suite",
+    "state": "failed",
+    "cwd": "/home/dev/src/shop-api",
+    "updated": 1789490939.3861783,
+    "can_resume": true,
+    "model": "gpt-5-codex",
+    "last_user": "Finish the migration and run the tests.",
+    "last_assistant": "Stopped after reaching the weekly usage limit.",
+    "reason": "usage_limit"
+   },
+   {
+    "id": "019a4b90-11aa-4e6e-8c02-6f1d2a9b3c44",
+    "provider": "codex",
+    "title": "Add retry with backoff to the webhook dispatcher",
+    "state": "stuck",
+    "cwd": "/home/dev/src/notify",
+    "updated": 1789485839.3861783,
+    "can_reboot": true,
+    "live": true,
+    "model": "gpt-5-codex",
+    "last_user": "Add exponential backoff and a dead-letter queue.",
+    "last_assistant": "Waiting for quota."
+   },
+   {
+    "id": "019a4a02-9e51-4b8d-b7f3-0c2d4e6f8a10",
+    "provider": "codex",
+    "title": "Write release notes for v2.4",
+    "state": "failed",
+    "cwd": "/home/dev/src/docs",
+    "updated": 1789471439.3861783,
+    "can_resume": true,
+    "model": "gpt-5",
+    "last_user": "Draft the release notes from the changelog.",
+    "last_assistant": "Stopped after reaching the usage limit."
+   },
+   {
+    "id": "bd98a474-3c1e-4b6a-9f20-7e5d1c8a2b93",
+    "provider": "claude",
+    "title": "Review the release changes",
+    "state": "stuck",
+    "cwd": "/home/dev/src/shop-api",
+    "updated": 1789490039.3861783,
+    "can_reboot": true,
+    "live": true,
+    "model": "claude-opus-5",
+    "last_user": "Review changes for the release.",
+    "last_assistant": "Waiting for quota."
+   },
+   {
+    "id": "7f3a91c2-0d4e-4a8b-b6c1-2e9f5d7a8b41",
+    "provider": "claude",
+    "title": "Refactor the auth middleware into a package",
+    "state": "failed",
+    "cwd": "/home/dev/src/gateway",
+    "updated": 1789478639.3861783,
+    "can_resume": true,
+    "model": "claude-sonnet-5",
+    "last_user": "Split the middleware into its own package.",
+    "last_assistant": "Stopped after reaching the 5-hour limit."
+   }
+  ]
+ }
+}

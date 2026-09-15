@@ -1,0 +1,96 @@
+name: Release
+
+# Tag a commit `vX.Y.Z` (matching hotseat/__init__.py) and push the tag.
+# PyPI publishing runs only when the repository variable PYPI_PUBLISH is "true";
+# it uses trusted publishing through the `pypi` environment, configured on PyPI
+# for the `hotseat` and `hotseat-clarp` projects. Re-run for an existing tag
+# with "Run workflow" and the tag name.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Tag must match the package version
+        run: |
+          version="$(python -c 'import hotseat; print(hotseat.__version__)')"
+          test "v${version}" = "${RELEASE_TAG}" || { echo "tag ${RELEASE_TAG} != v${version}"; exit 1; }
+      - run: python -m pip install --upgrade build wheel
+      - name: Tests
+        run: |
+          python -m unittest discover -s tests -t .
+          PYTHONPATH=plugins/clarp python -m unittest discover -s plugins/clarp/tests
+          go vet ./... && go test ./...
+      - name: Build sdist, platform wheels, and standalone binaries
+        run: python scripts/build_wheels.py --binaries
+      - name: Build the Clarp plugin
+        run: python -m build --outdir dist/ plugins/clarp
+      - name: Installed-wheel check
+        run: python scripts/check_packaged_helpers.py dist/hotseat-*-manylinux_2_17_x86_64*.whl
+      - name: Checksums
+        run: cd dist && sha256sum hotseat-tui-* > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          files: |
+            dist/hotseat-tui-*
+            dist/SHA256SUMS
+            dist/*.whl
+            dist/*.tar.gz
+
+  pypi:
+    if: vars.PYPI_PUBLISH == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Keep only Python distributions
+        run: rm -f dist/hotseat-tui-* dist/SHA256SUMS
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
