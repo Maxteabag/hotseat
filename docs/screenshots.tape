@@ -1,7 +1,6 @@
 # Regenerate the README screenshots with VHS (https://github.com/charmbracelet/vhs).
 #
-#   go build -o bin/hotseat-tui ./cmd/hotseat-tui
-#   python3 docs/make_fixture.py
+#   go build -o bin/hotseat ./cmd/hotseat
 #   vhs docs/screenshots.tape
 #
 # Everything shown comes from docs/demo-fixture.json; no account is read.
@@ -15,7 +14,7 @@ Set Padding 16
 Set Theme { "background": "#171b24", "foreground": "#d6dce8", "cursor": "#171b24" }
 
 Hide
-Type "bin/hotseat-tui --demo-file docs/demo-fixture.json"
+Type "bin/hotseat tui --demo-file docs/demo-fixture.json"
 Enter
 Sleep 2s
 Show

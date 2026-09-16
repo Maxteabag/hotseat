@@ -21,27 +21,18 @@ none of these. Hotseat answers all of them from one screen.
 
 ## Install
 
+Hotseat is a single static binary with no runtime dependencies.
+
 ```bash
-uv tool install hotseat        # or: pipx install hotseat
+go install github.com/Maxteabag/hotseat/cmd/hotseat@latest
 hotseat tui
 ```
 
-Until the first PyPI release lands, install straight from GitHub:
+Or download the binary for Linux or macOS (x86_64 and arm64) from the
+[GitHub release](https://github.com/Maxteabag/hotseat/releases), check it
+against the release's `SHA256SUMS`, and put it on your `PATH`. Every release
+also carries a Homebrew formula (`hotseat.rb`) you can `brew install` from a tap.
 
-```bash
-uv tool install git+https://github.com/Maxteabag/hotseat
-# or: pipx install git+https://github.com/Maxteabag/hotseat
-```
-
-The PyPI wheels bundle the prebuilt terminal interface for Linux and macOS on
-x86_64 and arm64, so `hotseat tui` works straight away. An install without a
-bundled binary (git, sdist) fetches the matching `hotseat-tui` from the
-[GitHub release](https://github.com/Maxteabag/hotseat/releases) for its own
-version on first run, verifies it against the release's SHA-256 checksums, and
-caches it under `~/.local/share/hotseat/bin/`. Set `HOTSEAT_NO_DOWNLOAD=1` to
-forbid that, or `HOTSEAT_TUI_BIN` to point at a binary of your own.
-
-The Python side has no third-party dependencies and needs Python 3.10 or newer.
 The `claude` CLI is needed for Claude accounts and the `codex` CLI for Codex
 accounts; they perform the sign-in and, for Codex, serve live quota.
 
@@ -49,10 +40,9 @@ From a checkout:
 
 ```bash
 git clone https://github.com/Maxteabag/hotseat && cd hotseat
-python3 -m pip install .
-go build -o bin/hotseat-tui ./cmd/hotseat-tui   # Go 1.25 or newer
-hotseat tui          # finds bin/hotseat-tui first
-hotseat tui --demo   # synthetic accounts, no network, no actions
+go build -o bin/hotseat ./cmd/hotseat   # Go 1.25 or newer
+bin/hotseat tui
+bin/hotseat tui --demo   # synthetic accounts, no network, no actions
 ```
 
 ## The terminal interface
@@ -222,31 +212,16 @@ work may not use that family. Each native Claude session is listed with a
 ready-to-paste `claude --resume` command and its working directory; the TUI's
 Work screen covers Codex sessions as well.
 
-## The web dashboard
-
-`hotseat serve` starts a loopback-only web view over the same data with Launch,
-Verify and Make-default buttons. It rebuilds a snapshot only when a request
-arrives and the cached one has aged past `--interval`, and exits after thirty
-minutes without requests. Every state-changing request must carry a token minted
-when the page loads; foreign origins are refused. `--host` binds elsewhere and
-the process warns that this exposes account controls to anyone who can reach
-the port.
-
 ## Optional Clarp integration
 
-If you run [Clarp](https://github.com/Maxteabag/clarp) agents, a separate plugin
-adds agent monitoring, conversation inspection and supervised recovery:
-
-```bash
-python3 -m pip install ./plugins/clarp
-```
+If you run [Clarp](https://github.com/Maxteabag/clarp) agents, Hotseat adds
+agent monitoring, conversation inspection and supervised recovery. It switches
+itself on when Clarp's state database exists at
+`~/.local/share/clarp/state.sqlite` and stays out of the way otherwise.
 
 `hotseat clarp` lists agents and the account each running one is spending;
 `hotseat resume --go` continues agents that a usage limit parked, once an
-account can serve their model. The core never imports the plugin. Uninstall
-`hotseat-clarp` to remove it, or set `HOTSEAT_PLUGINS=none` to disable
-discovery. See [plugins/clarp/README.md](plugins/clarp/README.md) and
-[docs/plugins.md](docs/plugins.md) for the plugin API.
+account can serve their model.
 
 ## Where the numbers come from
 
@@ -268,36 +243,32 @@ read-only: quota and deadlines are shown, management controls are hidden.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -t .                        # core
-PYTHONPATH=plugins/clarp python3 -m unittest discover -s plugins/clarp/tests
-go test ./... && go vet ./...                                     # TUI
+gofmt -l cmd internal && go vet ./... && go test -race ./...
 ```
 
 The tests use temporary directories and fixture data throughout; none read
-real credentials or make a network request. CI runs them on every push and
-pull request, then builds the wheels and installs one into a clean temporary
-home with a fake `codex` binary to prove quota reads and switching work
-without a checkout (`scripts/check_packaged_helpers.py`).
+real credentials, run the real `claude` or `codex` binaries, or make a network
+request. Codex's app-server protocol is exercised against an in-memory fake.
+CI runs them on every push and pull request and cross-compiles for every
+release target.
 
-Releases are cut by tagging: bump `__version__` in `hotseat/__init__.py`, tag
-the commit `vX.Y.Z`, and push the tag. The release workflow cross-compiles the
-TUI, builds an sdist plus one wheel per platform with the binary inside
-(`scripts/build_wheels.py`), publishes `hotseat` and `hotseat-clarp` to PyPI
-through trusted publishing, and attaches the standalone binaries with
-checksums to a GitHub release.
+Releases are cut by tagging: bump `Version` in `internal/version`, tag the
+commit `vX.Y.Z`, and push the tag. The release workflow builds four static
+binaries, writes `SHA256SUMS` and a Homebrew formula, and attaches them to a
+GitHub release.
 
 The README screenshots are generated with [VHS](https://github.com/charmbracelet/vhs)
 from synthetic data:
 
 ```bash
-python3 docs/make_fixture.py     # writes docs/demo-fixture.json
-vhs docs/screenshots.tape        # writes docs/*.png
+vhs docs/screenshots.tape        # reads docs/demo-fixture.json, writes docs/*.png
 ```
 
-Layout: the Python core in `hotseat/` knows nothing about either front end.
-The TUI (`cmd/hotseat-tui`, `internal/tui`) and the dashboard
-(`hotseat/web/index.html`) call the same functions through `hotseat.tui_bridge`
-and `hotseat.server`.
+Layout: `internal/claude`, `internal/codex`, `internal/quota`, `internal/work`
+and `internal/clarp` read the machine and talk to the providers and know
+nothing about any front end. `internal/collect` assembles snapshots from them,
+and both the TUI (`internal/tui`) and the command line (`cmd/hotseat`) consume
+those.
 
 ## License
 

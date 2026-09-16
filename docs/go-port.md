@@ -1,6 +1,6 @@
 # Go port: design contract
 
-Hotseat becomes a single Go binary. Every Python module under `hotseat/` is ported to
+Hotseat is a single Go binary; this documents how the Python original was ported. Every Python module under `hotseat/` is ported to
 Go under `internal/`; the Bubble Tea TUI in `internal/tui` stops shelling out to
 `python3 -m hotseat.tui_bridge` and calls Go functions. The Python package, the wheel
 build, the binary download path, the plugin entry-point system, `hotseat serve` and
@@ -55,4 +55,8 @@ list it here under "Decisions".
 
 ## Verification against the Python
 
-`scripts/compare_bridge.py` (added during the port) runs `python3 -m hotseat.tui_bridge snapshot --refresh` and `hotseat bridge snapshot --refresh` on the real machine, normalises volatile fields (`generated_at`, `checked_at`, `reset`, `used`, `cached`, `warning`) and diffs the rest. Same for `work`. The port is done when the diff is empty for every operation on Peter's accounts and the CLI `--json` outputs match for `list`, `codex`, `models`, `resets`, `sessions`, `resume`.
+During the port a harness ran the Python bridge and the Go binary side by side on a
+real machine, stripped volatile fields and diffed the rest. `snapshot`, `work` and
+every scriptable `--json` subcommand matched; the only remaining differences were
+the server's own unstable key order in Codex rate-limit windows and Go printing
+integral floats without a trailing `.0`. The Python package was then removed.

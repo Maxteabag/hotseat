@@ -1,10 +1,8 @@
 name: Release
 
-# Tag a commit `vX.Y.Z` (matching hotseat/__init__.py) and push the tag.
-# PyPI publishing runs only when the repository variable PYPI_PUBLISH is "true";
-# it uses trusted publishing through the `pypi` environment, configured on PyPI
-# for the `hotseat` and `hotseat-clarp` projects. Re-run for an existing tag
-# with "Run workflow" and the tag name.
+# Tag a commit `vX.Y.Z` (matching internal/version) and push the tag. Re-run for
+# an existing tag with "Run workflow" and the tag name. Publishes four static
+# binaries, their SHA-256 checksums and a Homebrew formula to the GitHub release.
 
 on:
   push:
@@ -12,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build and publish, e.g. v0.1.0"
+        description: "Existing tag to build and publish, e.g. v0.2.0"
         required: true
 
 permissions:
@@ -28,30 +26,66 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: Tag must match the package version
+      - name: Tag must match the binary version
         run: |
-          version="$(python -c 'import hotseat; print(hotseat.__version__)')"
+          version="$(go run ./cmd/hotseat --version | awk '{print $2}')"
           test "v${version}" = "${RELEASE_TAG}" || { echo "tag ${RELEASE_TAG} != v${version}"; exit 1; }
-      - run: python -m pip install --upgrade build wheel
-      - name: Tests
+      - run: gofmt -l cmd internal | tee /dev/stderr | test -z "$(cat)"
+      - run: go vet ./... && go test -race ./...
+      - name: Build static binaries
         run: |
-          python -m unittest discover -s tests -t .
-          PYTHONPATH=plugins/clarp python -m unittest discover -s plugins/clarp/tests
-          go vet ./... && go test ./...
-      - name: Build sdist, platform wheels, and standalone binaries
-        run: python scripts/build_wheels.py --binaries
-      - name: Build the Clarp plugin
-        run: python -m build --outdir dist/ plugins/clarp
-      - name: Installed-wheel check
-        run: python scripts/check_packaged_helpers.py dist/hotseat-*-manylinux_2_17_x86_64*.whl
-      - name: Checksums
-        run: cd dist && sha256sum hotseat-tui-* > SHA256SUMS
+          version="${RELEASE_TAG#v}"
+          mkdir -p dist
+          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            GOOS="${target%-*}" GOARCH="${target#*-}" CGO_ENABLED=0 \
+              go build -trimpath -ldflags "-s -w" -o "dist/hotseat-${version}-${target}" ./cmd/hotseat
+          done
+          cd dist && sha256sum hotseat-* > SHA256SUMS && cat SHA256SUMS
+      - name: Homebrew formula
+        run: |
+          version="${RELEASE_TAG#v}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          sum() { awk -v f="hotseat-${version}-$1" '$2==f{print $1}' dist/SHA256SUMS; }
+          cat > dist/hotseat.rb <<EOF
+          class Hotseat < Formula
+            desc "Terminal dashboard and CLI for Claude Code and Codex accounts, their quota, and work a usage limit stopped"
+            homepage "https://github.com/${GITHUB_REPOSITORY}"
+            version "${version}"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "${base}/hotseat-${version}-darwin-arm64"
+                sha256 "$(sum darwin-arm64)"
+              end
+              on_intel do
+                url "${base}/hotseat-${version}-darwin-amd64"
+                sha256 "$(sum darwin-amd64)"
+              end
+            end
+            on_linux do
+              on_arm do
+                url "${base}/hotseat-${version}-linux-arm64"
+                sha256 "$(sum linux-arm64)"
+              end
+              on_intel do
+                url "${base}/hotseat-${version}-linux-amd64"
+                sha256 "$(sum linux-amd64)"
+              end
+            end
+
+            def install
+              bin.install Dir["hotseat-*"].first => "hotseat"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/hotseat --version")
+            end
+          end
+          EOF
       - uses: actions/upload-artifact@v7
         with:
           name: dist
@@ -72,25 +106,6 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           files: |
-            dist/hotseat-tui-*
+            dist/hotseat-*
             dist/SHA256SUMS
-            dist/*.whl
-            dist/*.tar.gz
-
-  pypi:
-    if: vars.PYPI_PUBLISH == 'true'
-    needs: build
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist/
-      - name: Keep only Python distributions
-        run: rm -f dist/hotseat-tui-* dist/SHA256SUMS
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          skip-existing: true
+            dist/hotseat.rb

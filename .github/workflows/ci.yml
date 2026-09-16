@@ -6,25 +6,8 @@ on:
   pull_request:
 
 jobs:
-  python:
-    name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Core tests
-        run: python -m unittest discover -s tests -t .
-      - name: Clarp plugin tests
-        run: PYTHONPATH=plugins/clarp python -m unittest discover -s plugins/clarp/tests
-
   go:
-    name: Go TUI
+    name: Go
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -34,38 +17,26 @@ jobs:
       - run: gofmt -l cmd internal | tee /dev/stderr | test -z "$(cat)"
       - run: go vet ./...
       - run: go test -race ./...
-      - name: Render a demo frame
+      - name: Build and render a demo frame
         run: |
-          go build -o bin/hotseat-tui ./cmd/hotseat-tui
-          bin/hotseat-tui --render --demo-file docs/demo-fixture.json --width 110 --height 30 | head -5
+          CGO_ENABLED=0 go build -trimpath -o bin/hotseat ./cmd/hotseat
+          bin/hotseat --version
+          bin/hotseat tui --render --demo-file docs/demo-fixture.json --width 110 --height 30 | head -5
 
-  wheels:
-    name: Wheels
+  cross:
+    name: Cross-compile ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - run: python -m pip install --upgrade build wheel
-      - name: Build sdist and platform wheels
-        run: python scripts/build_wheels.py
-      - name: Installed-wheel check (clean home, fake codex, no checkout)
-        run: python scripts/check_packaged_helpers.py dist/hotseat-*-manylinux_2_17_x86_64*.whl
-      - name: Bundled TUI runs from the installed wheel
-        run: |
-          python -m venv /tmp/smoke
-          /tmp/smoke/bin/pip install --no-index dist/hotseat-*-manylinux_2_17_x86_64*.whl
-          cd /tmp   # -I and a foreign cwd: import the installed package, not the checkout
-          /tmp/smoke/bin/hotseat --version
-          bin="$(/tmp/smoke/bin/python -I -c 'from hotseat import cli; print(cli.find_tui_binary())')"
-          echo "$bin"; case "$bin" in */site-packages/hotseat/_bin/hotseat-tui) ;; *) echo "not the bundled binary"; exit 1;; esac
-          "$bin" --version
-          "$bin" --render --demo-file "$GITHUB_WORKSPACE/docs/demo-fixture.json" --width 100 --height 24 | head -3
-      - uses: actions/upload-artifact@v7
-        with:
-          name: dist
-          path: dist/
+      - run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -trimpath -o /dev/null ./cmd/hotseat
