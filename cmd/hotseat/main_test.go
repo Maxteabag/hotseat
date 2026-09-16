@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/Maxteabag/hotseat/internal/version"
 	"reflect"
 	"sort"
 	"strings"
@@ -1075,7 +1076,7 @@ func TestEveryCommandIsReachable(t *testing.T) {
 
 func TestVersion(t *testing.T) {
 	h := newHarness(t)
-	if code := h.run("--version"); code != 0 || h.out.String() != "hotseat 0.1.0\n" {
+	if code := h.run("--version"); code != 0 || h.out.String() != "hotseat "+version.Version+"\n" {
 		t.Errorf("exit %d, out %q", code, h.out.String())
 	}
 }
