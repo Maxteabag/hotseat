@@ -40,7 +40,7 @@ From a checkout:
 
 ```bash
 git clone https://github.com/Maxteabag/hotseat && cd hotseat
-go build -o bin/hotseat ./cmd/hotseat   # Go 1.25 or newer
+go build -o bin/hotseat ./cmd/hotseat   # Go 1.26 or newer
 bin/hotseat tui
 bin/hotseat tui --demo   # synthetic accounts, no network, no actions
 ```
@@ -94,7 +94,7 @@ vertically.
 
 ## The command line
 
-Every subcommand takes `--json`, so anything the TUI shows can be scripted.
+Every reporting subcommand takes `--json`, so anything the TUI shows can be scripted.
 
 ```bash
 hotseat list                    # Claude accounts: quota, status, sign-in deadline
@@ -114,7 +114,6 @@ hotseat nudge <id> "continue"   # message a running Codex session
 hotseat reboot <id>             # close a stuck Codex session and resume it
 hotseat resume                  # work a usage limit stopped
 hotseat inspect <id>            # what a stopped session was doing
-hotseat serve                   # local web dashboard
 ```
 
 Exit codes: 0 success, 1 failed operation, 2 usage error.

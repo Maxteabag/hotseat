@@ -547,7 +547,7 @@ func TestExecSessionFailuresAreActionErrors(t *testing.T) {
 	err = ExecSession(newFakeBackend("x"), "work", nil, func(string, []string, []string) error {
 		return errors.New("exec: not found")
 	})
-	if !strings.Contains(expectActionError(t, err).Msg, "Could not start claude") {
+	if !strings.Contains(expectActionError(t, err).Msg, "could not start claude") {
 		t.Fatalf("message = %q", err)
 	}
 }

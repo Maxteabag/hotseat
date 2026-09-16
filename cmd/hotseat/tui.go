@@ -51,7 +51,10 @@ func (a *app) realTUI(ctx context.Context, options tuiOptions) int {
 			a.errorln(err.Error())
 			return 1
 		}
-		_ = json.NewEncoder(a.stdout).Encode(s)
+		if err := json.NewEncoder(a.stdout).Encode(s); err != nil {
+			a.errorln(err.Error())
+			return 1
+		}
 		return 0
 	}
 	m := tui.New(ctx, backend)

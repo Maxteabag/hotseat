@@ -437,7 +437,7 @@ func ExecSession(backend Backend, alias string, argv []string, execute Execute) 
 	}
 	full := append([]string{"claude"}, argv...)
 	if err := execute("claude", full, env); err != nil {
-		return actionErrorf(err, "Could not start claude: %v", err)
+		return actionErrorf(err, "could not start claude: %v", err)
 	}
 	return nil
 }

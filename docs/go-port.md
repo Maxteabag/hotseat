@@ -27,7 +27,7 @@ list it here under "Decisions".
 
 ## Conventions
 
-- Go 1.25, `CGO_ENABLED=0`. SQLite is `modernc.org/sqlite` (driver name `sqlite`), opened read-only with `file:<path>?mode=ro&_time_format=sqlite`. PTY is not needed.
+- Go 1.26, `CGO_ENABLED=0`. SQLite is `modernc.org/sqlite` (driver name `sqlite`), opened read-only with `file:<path>?mode=ro&_time_format=sqlite`. PTY is not needed.
 - Errors: each package has one sentinel-ish type mirroring the Python exception (`quota.UsageError` with `RetryAfter`, `claude.BackendError`, `work.WorkError`, ...). Messages copy the Python strings; the TUI and CLI show them to users.
 - No global mutable state except explicit in-memory caches guarded by a mutex. Never mutate `os.Environ`; build `exec.Cmd.Env` per command.
 - Subprocesses: same argv as the Python, same timeouts, `context.WithTimeout`. Strip `BLOCKED_ENV` where the Python does.
