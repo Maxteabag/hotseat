@@ -1,0 +1,105 @@
+# GoReleaser builds every release artefact from a `vX.Y.Z` tag: four static
+# binaries in tar.gz archives, SHA256SUMS, .deb and .rpm packages, the GitHub
+# release itself, and the Homebrew formula pushed to Maxteabag/homebrew-tap.
+# Run `goreleaser release --snapshot --clean --skip=publish` to try it locally.
+version: 2
+
+project_name: hotseat
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: hotseat
+    main: ./cmd/hotseat
+    binary: hotseat
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: [-s -w]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: tarballs
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: SHA256SUMS
+
+nfpms:
+  - id: packages
+    package_name: hotseat
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    homepage: https://github.com/Maxteabag/hotseat
+    maintainer: Maxteabag <Maxteabag@users.noreply.github.com>
+    description: Terminal dashboard and CLI for Claude Code and Codex accounts, their quota, and work a usage limit stopped
+    license: MIT
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    section: utils
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/hotseat/LICENSE
+
+brews:
+  - name: hotseat
+    ids: [tarballs]
+    repository:
+      owner: Maxteabag
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    commit_author:
+      name: hotseat-release
+      email: Maxteabag@users.noreply.github.com
+    commit_msg_template: "hotseat {{ .Tag }}"
+    homepage: https://github.com/Maxteabag/hotseat
+    description: Terminal dashboard and CLI for Claude Code and Codex accounts, their quota, and work a usage limit stopped
+    license: MIT
+    install: |
+      bin.install "hotseat"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/hotseat --version")
+
+release:
+  github:
+    owner: Maxteabag
+    name: hotseat
+  draft: false
+  prerelease: auto
+  footer: |
+    ## Install
+
+    ```bash
+    brew install maxteabag/tap/hotseat
+    go install github.com/Maxteabag/hotseat/cmd/hotseat@{{ .Tag }}
+    ```
+
+    Debian and RPM packages are attached below, as are tarballs for Linux and
+    macOS on x86_64 and arm64. Verify downloads against `SHA256SUMS`.
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))?!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))?!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - "^test:"
+      - "^ci:"
+      - "^docs:"

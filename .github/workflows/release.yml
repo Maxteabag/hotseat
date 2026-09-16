@@ -1,8 +1,11 @@
 name: Release
 
-# Tag a commit `vX.Y.Z` (matching internal/version) and push the tag. Re-run for
-# an existing tag with "Run workflow" and the tag name. Publishes four static
-# binaries, their SHA-256 checksums and a Homebrew formula to the GitHub release.
+# Tag a commit `vX.Y.Z` (matching internal/version) and push the tag. GoReleaser
+# (.goreleaser.yaml) builds the tarballs, SHA256SUMS, .deb and .rpm packages,
+# publishes the GitHub release and pushes the Homebrew formula to
+# Maxteabag/homebrew-tap. Re-run for an existing tag with "Run workflow".
+#
+# Secrets: HOMEBREW_TAP_GITHUB_TOKEN, a token with push access to the tap repo.
 
 on:
   push:
@@ -10,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build and publish, e.g. v0.2.0"
+        description: "Existing tag to build and publish, e.g. v0.2.1"
         required: true
 
 permissions:
@@ -20,12 +23,15 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -35,77 +41,11 @@ jobs:
           test "v${version}" = "${RELEASE_TAG}" || { echo "tag ${RELEASE_TAG} != v${version}"; exit 1; }
       - run: gofmt -l cmd internal | tee /dev/stderr | test -z "$(cat)"
       - run: go vet ./... && go test -race ./...
-      - name: Build static binaries
-        run: |
-          version="${RELEASE_TAG#v}"
-          mkdir -p dist
-          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
-            GOOS="${target%-*}" GOARCH="${target#*-}" CGO_ENABLED=0 \
-              go build -trimpath -ldflags "-s -w" -o "dist/hotseat-${version}-${target}" ./cmd/hotseat
-          done
-          cd dist && sha256sum hotseat-* > SHA256SUMS && cat SHA256SUMS
-      - name: Homebrew formula
-        run: |
-          version="${RELEASE_TAG#v}"
-          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
-          sum() { awk -v f="hotseat-${version}-$1" '$2==f{print $1}' dist/SHA256SUMS; }
-          cat > dist/hotseat.rb <<EOF
-          class Hotseat < Formula
-            desc "Terminal dashboard and CLI for Claude Code and Codex accounts, their quota, and work a usage limit stopped"
-            homepage "https://github.com/${GITHUB_REPOSITORY}"
-            version "${version}"
-            license "MIT"
-
-            on_macos do
-              on_arm do
-                url "${base}/hotseat-${version}-darwin-arm64"
-                sha256 "$(sum darwin-arm64)"
-              end
-              on_intel do
-                url "${base}/hotseat-${version}-darwin-amd64"
-                sha256 "$(sum darwin-amd64)"
-              end
-            end
-            on_linux do
-              on_arm do
-                url "${base}/hotseat-${version}-linux-arm64"
-                sha256 "$(sum linux-arm64)"
-              end
-              on_intel do
-                url "${base}/hotseat-${version}-linux-amd64"
-                sha256 "$(sum linux-amd64)"
-              end
-            end
-
-            def install
-              bin.install Dir["hotseat-*"].first => "hotseat"
-            end
-
-            test do
-              assert_match version.to_s, shell_output("#{bin}/hotseat --version")
-            end
-          end
-          EOF
-      - uses: actions/upload-artifact@v7
+      - uses: goreleaser/goreleaser-action@v7
         with:
-          name: dist
-          path: dist/
-
-  github-release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist/
-      - uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          generate_release_notes: true
-          files: |
-            dist/hotseat-*
-            dist/SHA256SUMS
-            dist/hotseat.rb
+          distribution: goreleaser
+          version: v2.18.1  # brews is deprecated upstream in favour of casks, which Linux Homebrew lacks; pin until that is resolved
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

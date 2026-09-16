@@ -24,14 +24,14 @@ none of these. Hotseat answers all of them from one screen.
 Hotseat is a single static binary with no runtime dependencies.
 
 ```bash
-go install github.com/Maxteabag/hotseat/cmd/hotseat@latest
+brew install maxteabag/tap/hotseat                          # macOS and Linux
+go install github.com/Maxteabag/hotseat/cmd/hotseat@latest  # with a Go toolchain
 hotseat tui
 ```
 
-Or download the binary for Linux or macOS (x86_64 and arm64) from the
-[GitHub release](https://github.com/Maxteabag/hotseat/releases), check it
-against the release's `SHA256SUMS`, and put it on your `PATH`. Every release
-also carries a Homebrew formula (`hotseat.rb`) you can `brew install` from a tap.
+Debian and RPM packages, and tarballs for Linux and macOS on x86_64 and
+arm64, are on the [releases page](https://github.com/Maxteabag/hotseat/releases)
+with a `SHA256SUMS` file to check them against.
 
 The `claude` CLI is needed for Claude accounts and the `codex` CLI for Codex
 accounts; they perform the sign-in and, for Codex, serve live quota.
