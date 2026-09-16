@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -392,9 +391,10 @@ func refreshViaCLI(directory string, credentials map[string]any, run RunCLI, cla
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = work
 	cmd.Env = env
-	// The output is captured and ignored; the side effect on disk is the answer.
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	// The output is discarded; the side effect on disk is the answer. Stdout and
+	// Stderr stay nil (the null device) rather than a pipe: a piped Run only
+	// returns once every holder of the pipe has closed it, so a child the CLI
+	// leaves behind would keep the refresh hanging past CLITimeout.
 	if err := run(cmd); err != nil {
 		var exit *exec.ExitError
 		if ctx.Err() != nil {

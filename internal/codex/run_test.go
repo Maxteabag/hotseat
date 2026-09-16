@@ -112,3 +112,31 @@ func TestAtomicWriteLeavesNoTemporaryBehind(t *testing.T) {
 		t.Fatalf("content = %s", raw)
 	}
 }
+
+func TestRunCommandIsNotHeldOpenByAnOrphanedChild(t *testing.T) {
+	// A grandchild that inherited the output pipes must not keep RunCommand
+	// waiting past the deadline, nor past a clean exit.
+	requireTool(t, "sh")
+	requireTool(t, "sleep")
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if _, err := RunCommand(ctx, []string{"sh", "-c", "( sleep 6 & ); sleep 6"}, nil); err == nil {
+		t.Fatal("a timeout must be reported")
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("RunCommand held open for %s by the orphaned child after the timeout", elapsed)
+	}
+
+	started = time.Now()
+	result, err := RunCommand(context.Background(), []string{"sh", "-c", "( sleep 6 & ); echo done; exit 4"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("RunCommand held open for %s by the orphaned child after a normal exit", elapsed)
+	}
+	if result.Code != 4 || result.Stdout != "done\n" {
+		t.Fatalf("result = %+v", result)
+	}
+}

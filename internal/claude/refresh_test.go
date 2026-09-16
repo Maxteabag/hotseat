@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -537,5 +538,38 @@ func TestPinnedCredentialsShapes(t *testing.T) {
 	path, data := pinnedCredentials("work", root)
 	if path != target || !reflect.DeepEqual(normalise(t, data), normalise(t, defaultCreds())) {
 		t.Fatalf("valid: %q %v", path, data)
+	}
+}
+
+func TestRefreshDoesNotWaitForAChildTheCLILeavesBehind(t *testing.T) {
+	// A background process that inherits the CLI's stdout would hold a pipe
+	// open long after the CLI exited. The refresh must not read the output
+	// through a pipe at all, so it returns as soon as the CLI does.
+	f := newRefreshFixture(t)
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh on PATH")
+	}
+	fake := filepath.Join(f.tmp, "bin", "claude")
+	script := `#!/bin/sh
+p="$CLAUDE_CONFIG_DIR/.credentials.json"
+exp=$(( ( $(date +%s) + 28800 ) * 1000 ))
+printf '{"claudeAiOauth":{"accessToken":"exec-access","refreshToken":"exec-refresh","expiresAt":%s,"subscriptionType":"max"}}' "$exp" > "$p"
+( sleep 6 & )
+printf '{"result":"OK"}\n'
+`
+	writeFile(t, fake, script)
+	if err := os.Chmod(fake, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	out, err := Refresh(f.backend, "work", RefreshOptions{Force: true, Claude: fake, SessionRoot: f.sessions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("refresh waited %s for the CLI's orphaned child", elapsed)
+	}
+	if !out.Refreshed || getString(f.stored(), "accessToken") != "exec-access" {
+		t.Fatalf("got %+v stored %v", out, f.stored())
 	}
 }

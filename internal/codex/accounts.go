@@ -589,7 +589,11 @@ func (p *Profiles) ProbeCredentials(ctx context.Context, authPath, profileName s
 	// Preserve refreshed tokens if any.
 	if fresh, readErr := os.ReadFile(tempAuth); readErr == nil {
 		if original, readErr := os.ReadFile(authPath); readErr == nil && !bytes.Equal(fresh, original) {
-			_ = atomicCopy(tempAuth, authPath)
+			if err := atomicCopy(tempAuth, authPath); err != nil {
+				// The rotated token exists only in the temp copy that is about to be
+				// removed; say so rather than lock the account out silently.
+				Warn(fmt.Sprintf("hotseat: could not store the refreshed Codex token for %s: %v", authPath, err))
+			}
 		}
 	}
 

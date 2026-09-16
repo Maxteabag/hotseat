@@ -239,7 +239,11 @@ func (c *Codex) readProfile(ctx context.Context, auth string) (json.RawMessage, 
 	// compare or copy is not a probe failure.
 	if fresh, readErr := os.ReadFile(tempAuth); readErr == nil {
 		if original, readErr := os.ReadFile(auth); readErr == nil && !bytes.Equal(fresh, original) {
-			_ = atomicCopy(tempAuth, auth)
+			if err := atomicCopy(tempAuth, auth); err != nil {
+				// The rotated token exists only in the temp copy that is about to be
+				// removed; say so rather than lock the account out silently.
+				Warn(fmt.Sprintf("hotseat: could not store the refreshed Codex token for %s: %v", auth, err))
+			}
 		}
 	}
 	return result, nil

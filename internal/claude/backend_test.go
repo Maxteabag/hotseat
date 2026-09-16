@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -417,4 +418,51 @@ func TestPlatformSelection(t *testing.T) {
 func sha8(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])[:8]
+}
+
+func TestLinuxUnreadableProfilesDirectoryIsABackendError(t *testing.T) {
+	// The Python raised PermissionError from iterdir(); reading it as "no
+	// profiles" would make Switch skip the outgoing-account snapshot.
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs POSIX permissions and a non-root user")
+	}
+	f := newLinuxFixture(t)
+	f.profile("work", "user@example.com", orgA, "tok")
+	profiles := filepath.Join(f.root, "profiles")
+	if err := os.Chmod(profiles, 0o100); err != nil { // traversable, not listable
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(profiles, 0o700) })
+	_, err := f.backend.Accounts()
+	var be *BackendError
+	if !errors.As(err, &be) || !strings.HasPrefix(be.Error(), "could not read profiles:") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestLinuxProfilesPathThatIsAFileMeansNoProfiles(t *testing.T) {
+	isolateHome(t)
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "profiles"), "not a directory")
+	writeJSON(t, filepath.Join(root, ".credentials.json"), oauthFixture("tok", "max"))
+	accounts, err := NewLinuxBackend(root).Accounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := aliases(accounts); !equalStrings(got, []string{SignedInAlias}) {
+		t.Fatalf("aliases = %v", got)
+	}
+}
+
+func TestAccountNeverMarshalsItsToken(t *testing.T) {
+	// Public() is the sanctioned view, but a stray Marshal of the Account itself
+	// must not be a leak either.
+	account := Account{Alias: "work", Email: "user@example.com", Token: "secret-value"}
+	raw, err := json.Marshal(account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "secret-value") || strings.Contains(string(raw), "Token") {
+		t.Fatalf("Account marshals its token: %s", raw)
+	}
 }

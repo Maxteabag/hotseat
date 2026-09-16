@@ -160,7 +160,7 @@ func (s *Sessions) LockHolders(threadID string) []int {
 	}
 	pids := []int{}
 	for _, part := range strings.Fields(result.Stdout) {
-		if pid, err := strconv.Atoi(part); err == nil && pid >= 0 && !strings.HasPrefix(part, "+") && !strings.HasPrefix(part, "-") {
+		if pid, err := strconv.Atoi(part); err == nil && pid > 0 && !strings.HasPrefix(part, "+") && !strings.HasPrefix(part, "-") {
 			pids = append(pids, pid)
 		}
 	}

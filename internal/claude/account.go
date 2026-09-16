@@ -15,7 +15,9 @@ type Account struct {
 	IsActive         bool
 	AccessExpiresAt  *int64 // milliseconds since the epoch
 	RefreshExpiresAt *int64 // milliseconds since the epoch
-	Token            string
+	// Token is excluded from JSON so that even a direct Marshal of an Account,
+	// rather than of its Public view, can never carry it out of the process.
+	Token string `json:"-"`
 
 	RateLimitTier string
 }

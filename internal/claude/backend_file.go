@@ -9,9 +9,12 @@ package claude
 // overwritten.
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // SignedInAlias is the alias of the live account when it matches no saved profile.
@@ -92,8 +95,13 @@ func (b *LinuxBackend) TrackedAlias() string {
 func (b *LinuxBackend) profiles() ([]Account, error) {
 	entries, err := os.ReadDir(b.ProfilesDir())
 	if err != nil {
-		// Not a directory (or absent): no saved profiles.
-		return nil, nil
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			// Not a directory (or absent): no saved profiles.
+			return nil, nil
+		}
+		// Anything else (an unreadable directory, say) must not read as "no
+		// profiles": Switch would then skip snapshotting the outgoing account.
+		return nil, &BackendError{Msg: fmt.Sprintf("could not read %s: %v", filepath.Base(b.ProfilesDir()), err), Err: err}
 	}
 	var found []Account
 	for _, entry := range entries {

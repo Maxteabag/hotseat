@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Result is what a finished subprocess left behind.
@@ -34,6 +35,11 @@ func RunCommand(ctx context.Context, argv []string, env []string) (Result, error
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// Once the command has exited (or the context killed it), stop waiting for
+	// the output pipes after this long. Without it a grandchild that inherited
+	// the pipes holds Run open past the deadline, which is how a probe with a
+	// 45-second timeout could hang the TUI indefinitely.
+	cmd.WaitDelay = pipeWaitDelay
 	err := cmd.Run()
 	result := Result{Code: -1, Stdout: stdout.String(), Stderr: stderr.String()}
 	if cmd.ProcessState != nil {
@@ -44,13 +50,19 @@ func RunCommand(ctx context.Context, argv []string, env []string) (Result, error
 		if ctx.Err() != nil {
 			return result, fmt.Errorf("%s timed out: %w", argv[0], ctx.Err())
 		}
-		if errors.As(err, &exit) {
+		if errors.As(err, &exit) || errors.Is(err, exec.ErrWaitDelay) {
+			// A non-zero exit is a Result. So is a clean exit whose pipes were
+			// left open by a grandchild: the command itself finished.
 			return result, nil
 		}
 		return result, err
 	}
 	return result, nil
 }
+
+// pipeWaitDelay is how long RunCommand keeps reading a finished command's
+// output pipes before giving up on whatever still holds them.
+const pipeWaitDelay = time.Second
 
 // CallCommand is the Caller used when none is injected: stdin, stdout and
 // stderr are the user's own.
@@ -168,3 +180,8 @@ func isSymlink(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
+
+// Warn reports a failure that must not abort the caller but must not vanish
+// either, such as a rotated token that could not be written back to its
+// profile. The default writes to stderr; the TUI may replace it.
+var Warn = func(msg string) { fmt.Fprintln(os.Stderr, msg) }

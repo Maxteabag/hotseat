@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -854,5 +855,32 @@ func TestDetachedSpawnRunsAndDetaches(t *testing.T) {
 			t.Fatal("the spawned command never ran")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestSwitchRefusesWhenProfilesCannotBeListed(t *testing.T) {
+	// Listing the profiles is how the outgoing live token finds its way back
+	// into its own profile. If that listing fails, the switch must stop before
+	// overwriting the live file, as the Python did.
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs POSIX permissions and a non-root user")
+	}
+	f := newSwitchFixture(t)
+	profiles := filepath.Join(f.root, "profiles")
+	if err := os.Chmod(profiles, 0o100); err != nil { // traversable, not listable
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(profiles, 0o700) })
+	_, err := Switch(f.backend, "other", 1, true)
+	var be *BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected a BackendError, got %v", err)
+	}
+	live := filepath.Join(f.root, ".credentials.json")
+	if f.token(live) != "LIVE" {
+		t.Fatalf("live token = %q; the live file was overwritten without a snapshot", f.token(live))
+	}
+	if got := f.token(filepath.Join(profiles, "work", "credentials.json")); got != "WORK-OLD" {
+		t.Fatalf("work profile token = %q", got)
 	}
 }
