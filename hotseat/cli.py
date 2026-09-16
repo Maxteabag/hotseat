@@ -24,7 +24,7 @@ import sys
 import time
 
 from . import __version__
-from . import bundled, actions, codex, codexsessions, inspect as inspect_mod, modelstats, resume, statusline
+from . import bundled, actions, codex, codexsessions, inspect as inspect_mod, modelstats, refresh, resume, statusline
 from .backends import BackendError, for_platform
 from .collect import SIGNIN_WARN_DAYS, Collector
 from .sessions import running_sessions
@@ -247,6 +247,45 @@ def cmd_switch(args) -> int:
     else:
         print(f"Default account is now {args.alias}.")
     return 0
+
+
+def cmd_refresh(args) -> int:
+    """Bring expired saved profiles back to full-length access tokens."""
+    backend = for_platform()
+    aliases = args.alias or []
+    if not aliases:
+        try:
+            accounts = backend.accounts()
+        except BackendError as exc:
+            print(_paint(f"✗ {exc}", RED), file=sys.stderr)
+            return 1
+        aliases = [a.alias for a in accounts if not a.alias.startswith("(")
+                   and (args.force or refresh.expired(a, margin=refresh.REFRESH_MARGIN_S))]
+        if not aliases:
+            if not args.json:
+                print(_paint("Every saved profile still has a usable token.", DIM))
+            else:
+                print(json.dumps({"refreshed": []}))
+            return 0
+    results, failed = [], False
+    for alias in aliases:
+        try:
+            out = refresh.refresh(backend, alias, force=args.force)
+        except refresh.RefreshError as exc:
+            out = {"alias": alias, "refreshed": False, "error": str(exc)}
+            failed = True
+        results.append(out)
+        if not args.json:
+            if out.get("error"):
+                print(f"{_paint('✗', RED)} {alias}: {out['error']}")
+            elif out["refreshed"]:
+                how = "from its pinned session" if out["source"] == "session" else "through the CLI"
+                print(f"{_paint('✓', GREEN)} {alias}: refreshed {how}, {out['hours_left']:.1f}h left")
+            else:
+                print(f"{_paint('·', DIM)} {alias}: {out['source']}, {out['hours_left']:.1f}h left")
+    if args.json:
+        print(json.dumps({"refreshed": results}, indent=2))
+    return 1 if failed else 0
 
 
 def cmd_models(args) -> int:
@@ -727,6 +766,11 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Arguments passed through to claude")
 
     add("window", cmd_window, "Open a new terminal window pinned to an account").add_argument("alias")
+
+    refresh_node = add("refresh", cmd_refresh,
+                       "Refresh expired access tokens of saved profiles through the CLI")
+    refresh_node.add_argument("alias", nargs="*", help="Profiles to refresh; default: every expired one")
+    refresh_node.add_argument("--force", action="store_true", help="Refresh even if the token is still valid")
 
     switch = add("switch", cmd_switch,
                  "Change the machine-wide default account (affects running sessions)")

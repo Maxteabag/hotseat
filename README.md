@@ -115,6 +115,7 @@ hotseat use work                # run a session pinned to that account, here
 hotseat use work --model opus   # extra arguments pass through to claude
 hotseat window work             # same, in a new terminal window
 hotseat switch work             # change the machine-wide default (asks first)
+hotseat refresh                 # renew expired access tokens of saved profiles
 hotseat resets                  # available Codex usage-reset credits (read only)
 hotseat models                  # token usage by model, last 7 days
 hotseat statusline              # "◆ work · you@example.com", for a status line
@@ -147,11 +148,28 @@ Add `hotseat statusline` to Claude Code's `statusLine` setting and a pinned
 session names its account. A session on the shared configuration says
 `default`, so the two are never confused.
 
-### Sign-in deadlines
+### Expired tokens and sign-in deadlines
 
-Refreshing an access token does not extend the refresh window, so every Claude
+A Claude access token lives about eight hours. A pinned session renews its own
+as it works, but a saved profile nobody has used since yesterday simply expires,
+and its quota cannot be read. Hotseat renews it: when a quota read meets an
+expired profile it refreshes the token first, and `hotseat refresh` does the
+same on demand for every expired profile, or for named ones with `--force`.
+
+The refresh is delegated to the `claude` CLI rather than reimplemented. A
+throwaway config directory is seeded with only that profile's credentials, one
+minimal Haiku request under a two-cent budget drives the CLI's own
+refresh-and-rotate path, and the rotated credentials are backed up before they
+replace the stored copy atomically. The shared configuration and running
+sessions are never touched. If a pinned session directory already holds a newer
+token, that is adopted instead and no request is spent. A failed automatic
+refresh is not retried for an hour; `HOTSEAT_NO_REFRESH=1` turns the automatic
+path off entirely.
+
+Renewing an access token does not extend the refresh window, so every Claude
 account has an interactive-login deadline of roughly a month that no activity
-postpones. `hotseat list` shows it, and it turns red inside seven days.
+postpones. `hotseat list` shows it, and it turns red inside seven days. Past
+that point the TUI says "Sign in required", which is the honest answer.
 
 ## Codex accounts
 

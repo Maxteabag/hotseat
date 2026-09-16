@@ -6,7 +6,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import threading
 import time
 
-from . import plugins, codex, modelstats, ratelimits, resume, usage
+from . import plugins, codex, modelstats, ratelimits, resume, usage, refresh
 from .backends import Backend, BackendError, for_platform
 from .sessions import running_sessions
 
@@ -98,8 +98,7 @@ class Collector:
             item["readiness"] = resume.readiness(item, views, default)
         return items
 
-    @staticmethod
-    def _probe(account):
+    def _probe(self, account):
         """Read one account's quota.
 
         The OAuth usage endpoint is the real source: it costs no inference, answers
@@ -109,9 +108,13 @@ class Collector:
         """
         if not account.token:
             return account, None, "no stored token"
-        expires=getattr(account,"access_expires_at",None)
-        if expires and expires/1000 <= time.time():
-            return account,None,"Access token expired; native refresh needed"
+        if refresh.expired(account):
+            # Never send a dead token to the API. Bring the profile back through
+            # the CLI first; if that cannot be done, say why and stop there.
+            try:
+                refresh.auto(self.backend, account)
+            except Exception as exc:  # RefreshError, or anything unexpected underneath it
+                return account, None, f"Access token expired; refresh failed: {exc}"
         try:
             return account, usage.for_token(account.token), None
         except usage.UsageError as first:

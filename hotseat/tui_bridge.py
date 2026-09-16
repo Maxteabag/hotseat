@@ -7,6 +7,7 @@ import subprocess
 from . import bundled
 import time
 from . import actions, codex, usage, resetcredits, quota_cache, codexlaunch
+from . import refresh as token_refresh
 from .backends import for_platform
 from .sessions import running_sessions
 
@@ -55,9 +56,11 @@ def snapshot(refresh=False):
             try:
                 if not account.token:
                     raise ValueError("No stored token")
-                expires=getattr(account,"access_expires_at",None)
-                if expires and expires/1000 <= time.time():
-                    raise ValueError("Access token expired; native refresh needed")
+                if token_refresh.expired(account):
+                    try:
+                        token_refresh.auto(backend, account)
+                    except Exception as exc:  # RefreshError, or anything unexpected underneath it
+                        raise ValueError(f"Access token expired; refresh failed: {exc}") from exc
                 limits = quota_cache.read(account.token)
                 row["checked_at"] = limits.get("_checked_at",time.time())
                 row["cached"] = limits.get("_cached",False)

@@ -144,6 +144,9 @@ func (m *Model) overview(w, h int) string {
 			if strings.Contains(a.Error, "429") {
 				status = "API throttled · retry later"
 			}
+			if strings.Contains(a.Error, "Access token expired") {
+				status = "Token expired · refresh failed"
+			}
 			lower := strings.ToLower(a.Error)
 			if strings.Contains(lower, "revoked") || strings.Contains(lower, "rejected") {
 				status = "Sign in required"

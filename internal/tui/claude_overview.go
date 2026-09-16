@@ -47,7 +47,10 @@ func (m *Model) claudeOverview(w, h int) string {
 			if a.Error != "" {
 				status = "Read failed · Enter for error"
 				if strings.Contains(a.Error, "Access token expired") {
-					status = "Token expired · refresh needed"
+					status = "Token expired · refresh failed · Enter for why"
+					if strings.Contains(a.Error, "not retried") {
+						status = "Token expired · refresh failed · retrying later"
+					}
 				}
 				if strings.Contains(a.Error, "429") {
 					status = safe(a.Error)
