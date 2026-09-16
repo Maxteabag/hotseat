@@ -127,13 +127,13 @@ func TestSummaryModelRecentAndScaffoldingAreHandled(t *testing.T) {
 }
 
 func TestSummaryOf(t *testing.T) {
-	if summaryOf("plain text") != "" {
+	if SummaryOf("plain text") != "" {
 		t.Fatal("non-preamble text has no summary")
 	}
-	if got := summaryOf(ContextPreamble + " that ran out of context. Primary Request and Intent: Fix the tests"); got != "Fix the tests" {
+	if got := SummaryOf(ContextPreamble + " that ran out of context. Primary Request and Intent: Fix the tests"); got != "Fix the tests" {
 		t.Fatalf("got %q", got)
 	}
-	if got := summaryOf(ContextPreamble + " with no marker"); got != "with no marker" {
+	if got := SummaryOf(ContextPreamble + " with no marker"); got != "with no marker" {
 		t.Fatalf("got %q", got)
 	}
 }

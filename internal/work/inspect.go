@@ -43,8 +43,10 @@ type RecentTurn struct {
 	Text string `json:"text"`
 }
 
-// summaryOf pulls the work description out of a context-continuation preamble.
-func summaryOf(text string) string {
+// SummaryOf pulls the work description out of a context-continuation preamble.
+// It is shared with the Clarp integration, whose agents receive the same
+// preamble when their conversation is continued.
+func SummaryOf(text string) string {
 	if !strings.HasPrefix(text, ContextPreamble) {
 		return ""
 	}
@@ -120,7 +122,7 @@ func NativeDetail(projectsDir, sessionID string) (*Detail, error) {
 	}
 	summary := ""
 	for i := len(entries) - 1; i >= 0; i-- {
-		if found := summaryOf(EntryText(entries[i])); found != "" {
+		if found := SummaryOf(EntryText(entries[i])); found != "" {
 			summary = found
 			break
 		}
