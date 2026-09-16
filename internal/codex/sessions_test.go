@@ -435,3 +435,33 @@ func TestProcessLookupsSurviveMissingProcesses(t *testing.T) {
 		t.Fatalf("parentPID = %d, want %d", parentPID(os.Getpid()), os.Getppid())
 	}
 }
+
+func TestThreadItemsAreOldestFirstAndKeepEmptyTexts(t *testing.T) {
+	f := newSessionsFixture(t)
+	f.turn("aaa", "completed", now)
+	f.item("aaa", "first", 1)
+	if _, err := f.db.Exec("INSERT INTO thread_items VALUES (?,?,?)", "aaa", 2, `{"type":"reasoning"}`); err != nil {
+		t.Fatal(err)
+	}
+	f.item("aaa", "third", 3)
+	f.item("aaa", "fourth", 4)
+	texts, err := f.sessions.ThreadItems("aaa", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"", "third", "fourth"}
+	if len(texts) != len(want) {
+		t.Fatalf("texts = %q", texts)
+	}
+	for i := range want {
+		if texts[i] != want[i] {
+			t.Fatalf("texts = %q, want %q", texts, want)
+		}
+	}
+	if _, err := f.sessions.ThreadItems("missing", 3); err != nil {
+		t.Fatalf("an unknown thread is empty, not an error: %v", err)
+	}
+	if _, err := NewSessions(t.TempDir()).ThreadItems("aaa", 3); err == nil {
+		t.Fatal("a missing database must be reported")
+	}
+}

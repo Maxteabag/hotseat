@@ -4,8 +4,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"context"
-	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -37,42 +35,6 @@ type WorkBackend interface {
 	Work(context.Context) (WorkSnapshot, error)
 	InspectWork(context.Context, WorkItem) (WorkItem, error)
 	WorkAction(context.Context, WorkItem, string) error
-}
-
-func (b *PythonBackend) Work(ctx context.Context) (WorkSnapshot, error) {
-	var s WorkSnapshot
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	out, err := b.execute(ctx, "work")
-	if err == nil {
-		err = json.Unmarshal(out, &s)
-	}
-	return s, err
-}
-func (b *PythonBackend) InspectWork(ctx context.Context, w WorkItem) (WorkItem, error) {
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	out, err := b.execute(ctx, "inspect-work", "--provider", w.Provider, "--id", w.ID)
-	if err != nil {
-		return w, responseError(out, err)
-	}
-	err = json.Unmarshal(out, &w)
-	return w, err
-}
-func (b *PythonBackend) WorkAction(ctx context.Context, w WorkItem, operation string) error {
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-	out, err := b.execute(ctx, operation+"-work", "--provider", w.Provider, "--id", w.ID, "--revision", w.Revision, "--acknowledged")
-	return responseError(out, err)
-}
-func responseError(out []byte, err error) error {
-	var r struct {
-		Error string `json:"error"`
-	}
-	if json.Unmarshal(out, &r) == nil && r.Error != "" {
-		return fmt.Errorf("%s", r.Error)
-	}
-	return err
 }
 
 type workMsg struct {

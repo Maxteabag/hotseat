@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -269,6 +270,37 @@ func (s *Sessions) readRecent(limit int) ([]Session, error) {
 		entry.LastStatus = status.String
 	}
 	return found, nil
+}
+
+// ThreadItems is the readable text of the last limit stored items of a
+// thread, oldest first. Items without text are empty strings, so callers can
+// count what was stored as well as what was said. It is the work package's
+// view of the history database (work.CodexSessions).
+func (s *Sessions) ThreadItems(threadID string, limit int) ([]string, error) {
+	db, err := sql.Open("sqlite", "file:"+s.HistoryDB()+"?mode=ro&_time_format=sqlite&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return nil, &SessionError{err.Error()}
+	}
+	defer db.Close()
+	rows, err := db.Query(`SELECT item_json FROM thread_items WHERE thread_id=?
+                           ORDER BY rollout_ordinal DESC LIMIT ?`, threadID, limit)
+	if err != nil {
+		return nil, &SessionError{err.Error()}
+	}
+	defer rows.Close()
+	var texts []string
+	for rows.Next() {
+		var blob sql.NullString
+		if err := rows.Scan(&blob); err != nil {
+			return nil, &SessionError{err.Error()}
+		}
+		texts = append(texts, firstText(blob.String))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, &SessionError{err.Error()}
+	}
+	slices.Reverse(texts)
+	return texts, nil
 }
 
 // topicOf is the first stored item that reads as a prompt rather than a

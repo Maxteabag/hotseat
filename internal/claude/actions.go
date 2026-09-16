@@ -447,6 +447,11 @@ func ExecSession(backend Backend, alias string, argv []string, execute Execute) 
 // that records the argv instead.
 type Spawn func(argv []string, env []string) error
 
+// DetachedSpawn is the Spawn used when none is injected: the process gets its
+// own session and its output goes to /dev/null, so a terminal window outlives
+// whatever launched it.
+func DetachedSpawn(argv []string, env []string) error { return detachedSpawn(argv, env) }
+
 func orDefaultSpawn(spawn Spawn) Spawn {
 	if spawn != nil {
 		return spawn
