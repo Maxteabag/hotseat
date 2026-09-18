@@ -16,6 +16,15 @@ import (
 // reason such as "no credits".
 const statusWidth = 10
 
+// codexRowName is how an account is listed: its profile name, or a label when
+// the credential is live but saved nowhere.
+func codexRowName(entry codex.Account) string {
+	if !entry.Saved {
+		return "live (unsaved)"
+	}
+	return entry.Alias
+}
+
 func (a *app) cmdCodex(cmd *command, ctx context.Context, args []string) (int, error) {
 	fs := a.flags(cmd)
 	asJSON := jsonFlag(cmd, fs)
@@ -38,7 +47,15 @@ func (a *app) cmdCodex(cmd *command, ctx context.Context, args []string) (int, e
 		return 1, nil
 	}
 
-	a.printf("%s %s  %s %s  ACCOUNT\n", leftPad("PROFILE", 14), rightPad("WORST", 6), leftPad("STATUS", statusWidth), rightPad("TOKEN", 9))
+	// Width from the data: a fixed 13 silently misaligned every row whose profile
+	// name was longer, which is most of them once names get descriptive.
+	nameWidth := len("PROFILE")
+	for _, entry := range entries {
+		if n := runeLen(codexRowName(entry)); n > nameWidth {
+			nameWidth = n
+		}
+	}
+	a.printf(" %s %s  %s %s  ACCOUNT\n", leftPad("PROFILE", nameWidth), rightPad("WORST", 6), leftPad("STATUS", statusWidth), rightPad("TOKEN", 9))
 	for _, entry := range entries {
 		usage := entry.Usage
 		used := "—"
@@ -76,14 +93,10 @@ func (a *app) cmdCodex(cmd *command, ctx context.Context, args []string) (int, e
 		if entry.IsActive {
 			marker = "*"
 		}
-		name := entry.Alias
-		if !entry.Saved {
-			name = "live (unsaved)"
-		}
 		// The status word is coloured, so it is padded here rather than by leftPad,
 		// which would count the escape sequence. A word wider than the column
 		// simply gets no padding; it must never ask for a negative Repeat.
-		a.printf("%s%s %s  %s%s %s  %s\n", marker, leftPad(name, 13), rightPad(used, 6), a.paint(word, colour),
+		a.printf("%s%s %s  %s%s %s  %s\n", marker, leftPad(codexRowName(entry), nameWidth), rightPad(used, 6), a.paint(word, colour),
 			strings.Repeat(" ", max(0, statusWidth-runeLen(word))), rightPad(token, 9), deref(entry.Email, "?"))
 	}
 

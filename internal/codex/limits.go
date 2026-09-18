@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -405,13 +406,26 @@ func summarize(name, email string, payload json.RawMessage) Row {
 // credential are skipped; a profile whose probe fails is an error row. Rows
 // are sorted with errors last, then by soonest reset.
 func (c *Codex) Compare(ctx context.Context, names []string) []Row {
-	if len(names) == 0 {
+	explicit := len(names) > 0
+	if !explicit {
 		names = c.SavedProfiles()
 	}
+	var live *Identity
 	if fileExists(c.LiveAuth()) {
+		live = c.identity(c.LiveAuth())
 		names = append([]string{LiveName}, names...)
 	}
-	rows := []Row{}
+
+	// The live credential and the profile that holds it are one account. Probing
+	// both spawns two app-servers for it and refreshes it twice in one run,
+	// which is exactly how one copy ends up holding a token the other rotated
+	// away. Probe once and report the reading under both names.
+	type target struct {
+		name    string
+		auth    string
+		aliasOf string
+	}
+	targets := []target{}
 	for _, name := range names {
 		auth := filepath.Join(c.ProfilesDir(), name, "auth.json")
 		if name == LiveName {
@@ -420,14 +434,48 @@ func (c *Codex) Compare(ctx context.Context, names []string) []Row {
 		if !fileExists(auth) {
 			continue
 		}
-		email := Describe(auth).Email
-		payload, err := c.readProfile(ctx, auth)
-		if err != nil {
-			msg := err.Error()
-			rows = append(rows, Row{Name: name, Email: email, Error: &msg})
+		if !explicit && name != LiveName && live != nil && sameAccount(c.identity(auth), live) {
+			targets = append(targets, target{name: name, auth: auth, aliasOf: LiveName})
 			continue
 		}
-		rows = append(rows, summarize(name, email, payload))
+		targets = append(targets, target{name: name, auth: auth})
+	}
+
+	readings := make([]Row, len(targets))
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, ProbeConcurrency)
+	for i := range targets {
+		if targets[i].aliasOf != "" {
+			continue
+		}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			readings[i] = c.read(ctx, targets[i].name, targets[i].auth)
+		}(i)
+	}
+	wg.Wait()
+
+	byName := map[string]Row{}
+	for i, t := range targets {
+		if t.aliasOf == "" {
+			byName[t.name] = readings[i]
+		}
+	}
+	rows := []Row{}
+	for i, t := range targets {
+		row := readings[i]
+		if t.aliasOf != "" {
+			row = byName[t.aliasOf]
+			row.Name = t.name
+			if identity := c.identity(t.auth); identity != nil && identity.Email != nil {
+				row.Email = *identity.Email
+			}
+		}
+		c.recordVerdict(t.name, t.auth, row)
+		rows = append(rows, row)
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		a, b := rows[i], rows[j]
@@ -437,6 +485,44 @@ func (c *Codex) Compare(ctx context.Context, names []string) []Row {
 		return resetKey(a) < resetKey(b)
 	})
 	return rows
+}
+
+// sameAccount is the Accounts() rule: email and workspace together, because
+// several users share one workspace id.
+func sameAccount(a, b *Identity) bool {
+	return a != nil && b != nil && a.AccountID != nil && *a.AccountID != "" &&
+		ptrEqual(a.AccountID, b.AccountID) && ptrEqual(a.Email, b.Email)
+}
+
+// read probes one credential under its own time budget, so one unreachable
+// account cannot consume the budget of the rest and leave them looking broken.
+func (c *Codex) read(ctx context.Context, name, auth string) Row {
+	email := Describe(auth).Email
+	probeCtx, cancel := context.WithTimeout(ctx, ProfileProbeTimeout)
+	defer cancel()
+	payload, err := c.readProfile(probeCtx, auth)
+	if err != nil {
+		msg := err.Error()
+		if probeCtx.Err() != nil && ctx.Err() == nil {
+			msg = fmt.Sprintf("timed out after %s reading quota", ProfileProbeTimeout)
+		}
+		return Row{Name: name, Email: email, Error: &msg}
+	}
+	return summarize(name, email, payload)
+}
+
+// recordVerdict keeps the profile listing honest: this run just asked the
+// server, so `list` need not go on calling a revoked credential "ok".
+func (c *Codex) recordVerdict(name, auth string, row Row) {
+	if name == LiveName || auth != filepath.Join(c.ProfilesDir(), name, "auth.json") {
+		return
+	}
+	switch {
+	case row.Error == nil:
+		RecordVerdict(c.ProfilesDir(), name, "live", auth)
+	case strings.Contains(*row.Error, "token_revoked"), strings.Contains(strings.ToLower(*row.Error), "revoked"):
+		RecordVerdict(c.ProfilesDir(), name, "revoked", auth)
+	}
 }
 
 func resetKey(row Row) float64 {

@@ -3,4 +3,4 @@
 package version
 
 // Version is the release number of this build.
-const Version = "0.2.1"
+const Version = "0.3.0"

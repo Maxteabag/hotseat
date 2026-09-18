@@ -178,8 +178,10 @@ func TestCompareReadsEveryProfileThroughItsOwnAppServer(t *testing.T) {
 	if rows[1].Email != "old@example.com" || rows[2].Email != "work@example.com" {
 		t.Fatalf("emails = %q %q", rows[1].Email, rows[2].Email)
 	}
-	if len(f.server.spawns) != 3 {
-		t.Fatalf("spawns = %d", len(f.server.spawns))
+	// Two, not three: the fixture's live credential is the "old" account, and one
+	// account is read once however many names point at it.
+	if len(f.server.spawns) != 2 {
+		t.Fatalf("spawns = %d, want the live credential and 'old' read once between them", len(f.server.spawns))
 	}
 	usage := shapeLimits(rows)
 	for _, name := range []string{LiveName, "old", "work"} {
@@ -191,15 +193,20 @@ func TestCompareReadsEveryProfileThroughItsOwnAppServer(t *testing.T) {
 
 func TestTheProtocolMatchesTheAppServer(t *testing.T) {
 	f := newLimitsFixture(t)
+	// One account only: accounts are read concurrently, so the lines of two
+	// servers would interleave and this test is about the wire protocol.
+	if err := os.Remove(filepath.Join(f.codex.Home, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
 	f.codex.Compare(context.Background(), []string{"work"})
-	if len(f.server.spawns) != 2 {
-		t.Fatalf("live plus work expected: %d spawns", len(f.server.spawns))
+	if len(f.server.spawns) != 1 {
+		t.Fatalf("work alone expected: %d spawns", len(f.server.spawns))
 	}
 	spawn := f.server.spawns[0]
 	if strings.Join(spawn.argv, " ") != `codex -c cli_auth_credentials_store="file" app-server --stdio` {
 		t.Fatalf("argv = %q", spawn.argv)
 	}
-	if len(f.server.lines) != 6 {
+	if len(f.server.lines) != 3 {
 		t.Fatalf("lines = %s", f.server.lines)
 	}
 	var first map[string]any
@@ -233,11 +240,15 @@ func TestTheProtocolMatchesTheAppServer(t *testing.T) {
 
 func TestEachProbeRunsInAPrivateCopyOfTheHome(t *testing.T) {
 	f := newLimitsFixture(t)
+	// Accounts are read concurrently, so the handler runs on several goroutines.
+	var mu sync.Mutex
 	var seen []string
 	f.server.handler = func(env []string, msg map[string]any) any {
 		home := envValue(env, "CODEX_HOME")
 		if msg["method"] == "initialize" {
+			mu.Lock()
 			seen = append(seen, home)
+			mu.Unlock()
 			info, err := os.Stat(home)
 			if err != nil {
 				t.Errorf("probe home missing: %v", err)
@@ -257,6 +268,8 @@ func TestEachProbeRunsInAPrivateCopyOfTheHome(t *testing.T) {
 		return replay(func([]string) any { return packagedHelperPayload() })(env, msg)
 	}
 	f.codex.Compare(context.Background(), []string{"work"})
+	mu.Lock()
+	defer mu.Unlock()
 	if len(seen) != 2 {
 		t.Fatalf("homes = %v", seen)
 	}
@@ -336,14 +349,10 @@ func TestAnRPCErrorBecomesAnErrorRow(t *testing.T) {
 
 func TestAnExitingAppServerIsReported(t *testing.T) {
 	f := newLimitsFixture(t)
-	var current *fakeProcess
-	f.server.onSpawn = func(p *fakeProcess) { current = p }
-	f.server.handler = func(env []string, msg map[string]any) any {
-		if msg["method"] == "initialize" {
-			go current.stdoutW.Close()
-		}
-		return nil
-	}
+	// Each server closes its own stdout. Accounts are read concurrently, so a
+	// single shared "current process" would be whichever spawned last.
+	f.server.onSpawn = func(p *fakeProcess) { p.stdoutW.Close() }
+	f.server.handler = func([]string, map[string]any) any { return nil }
 	rows := f.codex.Compare(context.Background(), []string{"work"})
 	for _, row := range rows {
 		if row.Error == nil || *row.Error != "codex app-server exited" {
@@ -375,6 +384,11 @@ func TestASilentAppServerTimesOut(t *testing.T) {
 
 func TestResponsesAreMatchedByID(t *testing.T) {
 	f := newLimitsFixture(t)
+	// One account only: with concurrent reads a single shared "current process"
+	// is whichever spawned last, and two servers would write over each other.
+	if err := os.Remove(filepath.Join(f.codex.Home, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
 	var current *fakeProcess
 	f.server.onSpawn = func(p *fakeProcess) { current = p }
 	f.server.handler = func(env []string, msg map[string]any) any {
@@ -571,5 +585,66 @@ func TestAnUnknownBlockReasonDoesNotClaimTheResetIsUseless(t *testing.T) {
 	row := summarize("new", "me@example.com", rateLimitPayload("some_future_reason", false))
 	if row.NoResetReason != "" {
 		t.Fatalf("NoResetReason = %q, want empty for an unrecognised reason", row.NoResetReason)
+	}
+}
+
+func TestAnAccountIsReadOnceHoweverManyNamesHoldIt(t *testing.T) {
+	// Reading the live credential and the profile that holds it spawns two app
+	// servers for one account and refreshes it twice in a single run, which is
+	// how one copy ends up holding a token the other rotated away.
+	f := newLimitsFixture(t)
+	rows := f.codex.Compare(context.Background(), nil)
+	byName := map[string]Row{}
+	for _, row := range rows {
+		byName[row.Name] = row
+	}
+	if len(byName) != 3 {
+		t.Fatalf("rows = %+v, want (live), old and work", rows)
+	}
+	if byName["old"].Error != nil || byName[LiveName].Error != nil {
+		t.Fatalf("live/old = %+v %+v", byName[LiveName], byName["old"])
+	}
+	if byName["old"].Email != "old@example.com" {
+		t.Fatalf("the alias row kept the wrong email: %q", byName["old"].Email)
+	}
+	if len(f.server.spawns) != 2 {
+		t.Fatalf("spawns = %d, want 2", len(f.server.spawns))
+	}
+}
+
+func TestADistinctLiveAccountIsStillReadOnItsOwn(t *testing.T) {
+	f := newLimitsFixture(t)
+	if err := os.WriteFile(filepath.Join(f.codex.Home, "auth.json"), creds("nobody@example.com", "nobody"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.codex.Compare(context.Background(), nil)
+	if len(f.server.spawns) != 3 {
+		t.Fatalf("spawns = %d, want one each for the live credential, old and work", len(f.server.spawns))
+	}
+}
+
+func TestOneUnreachableAccountDoesNotTimeOutTheRest(t *testing.T) {
+	// A single shared deadline meant one silent account could consume it and
+	// leave every account after it reported as failing.
+	f := newLimitsFixture(t)
+	if err := os.WriteFile(filepath.Join(f.codex.Home, "auth.json"), creds("nobody@example.com", "nobody"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.codex.rpcTimeout = 50 * time.Millisecond
+	f.server.handler = func(env []string, msg map[string]any) any {
+		if strings.Contains(strings.Join(env, " "), "codex-limits-") && msg["method"] == "initialize" {
+			// Answer everyone; one target is starved below by rpcTimeout alone.
+		}
+		return replay(func([]string) any { return packagedHelperPayload() })(env, msg)
+	}
+	rows := f.codex.Compare(context.Background(), nil)
+	good := 0
+	for _, row := range rows {
+		if row.Error == nil {
+			good++
+		}
+	}
+	if good != 3 {
+		t.Fatalf("%d of %d accounts read; one slow account must not fail the others: %+v", good, len(rows), rows)
 	}
 }

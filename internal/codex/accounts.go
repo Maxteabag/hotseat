@@ -314,7 +314,9 @@ type ProfileInfo struct {
 	IsLive bool `json:"is_live"`
 	// IsCurrent: the profile was last activated by this tool.
 	IsCurrent bool `json:"is_current"`
-	// Auth is "api-key", "ok" or "no-refresh".
+	// Auth is what is known about the credential: "api-key", "no-refresh",
+	// "stored" (a refresh token is present but has never been checked),
+	// "ok" (the server accepted it) or "revoked" (the server rejected it).
 	Auth string `json:"auth"`
 }
 
@@ -360,12 +362,23 @@ func (p *Profiles) ListProfiles() ([]ProfileInfo, error) {
 		isLive := live != nil && ((live.AccountID != "" && live.AccountID == info.AccountID &&
 			live.Email != "?" && live.Email == info.Email) ||
 			(name == active && live.Mode == "apikey" && info.Mode == "apikey"))
+		authPath := filepath.Join(p.ProfilesDir(), name, "auth.json")
 		auth := "no-refresh"
 		switch {
 		case info.Mode == "apikey":
 			auth = "api-key"
 		case info.Refreshable:
-			auth = "ok"
+			// A stored refresh token is not a working one. Only a probe knows,
+			// so say what is actually true until one has run.
+			auth = "stored"
+			if verdict, ok := VerdictFor(p.ProfilesDir(), name, authPath); ok {
+				switch verdict.Status {
+				case "live":
+					auth = "ok"
+				case "revoked":
+					auth = "revoked"
+				}
+			}
 		}
 		found = append(found, ProfileInfo{Name: name, Described: info, IsLive: isLive,
 			IsCurrent: name == active, Auth: auth})
@@ -389,6 +402,8 @@ func (p *Profiles) List() error {
 			info.Plan, info.Mode, info.Auth)
 	}
 	p.printf("\n* = matches the live auth.json   ~ = last activated by this tool\n")
+	p.printf("AUTH: ok/revoked = what the server last said; stored = a refresh token is\n")
+	p.printf("      present but unchecked. Check with: hotseat codex-account probe <name>\n")
 	return nil
 }
 
@@ -557,7 +572,7 @@ func probeArgv() []string {
 
 // ProbeCredentials runs an isolated test request against OpenAI to check token
 // validity and live quota.
-func (p *Profiles) ProbeCredentials(ctx context.Context, authPath, profileName string) ProbeResult {
+func (p *Profiles) ProbeCredentials(ctx context.Context, authPath, profileName string) (result ProbeResult) {
 	if !fileExists(authPath) {
 		return ProbeResult{Status: "error", Error: "credentials not found: " + authPath}
 	}
@@ -592,6 +607,21 @@ func (p *Profiles) ProbeCredentials(ctx context.Context, authPath, profileName s
 	}
 
 	credits := func() map[string]any { return FetchResetCredits(ctx, p.HTTP, authPath) }
+	defer func() {
+		// Recorded against the credential as it stands after any write-back
+		// above, so the verdict pins to the bytes the listing will hash. Only a
+		// profile's own file is recorded: probing the live credential says
+		// nothing about what any profile holds.
+		if authPath != filepath.Join(p.ProfilesDir(), profileName, "auth.json") {
+			return
+		}
+		switch result.Status {
+		case "revoked":
+			RecordVerdict(p.ProfilesDir(), profileName, "revoked", authPath)
+		case "ok", "limit_reached":
+			RecordVerdict(p.ProfilesDir(), profileName, "live", authPath)
+		}
+	}()
 	var errorMsg *string
 	var rateLimits json.RawMessage
 	for _, line := range strings.Split(proc.Stdout, "\n") {

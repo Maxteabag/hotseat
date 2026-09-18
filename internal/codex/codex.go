@@ -29,10 +29,16 @@ import (
 )
 
 const (
-	// ProbeTimeout bounds one full quota probe. Each profile is probed through
-	// its own app-server, one at a time, so a probe spawns one node process per
-	// saved account. That is far too heavy to run on a refresh timer, hence the
-	// cache below.
+	// ProfileProbeTimeout bounds the reading of ONE account. It is per account
+	// rather than per batch: a single global budget meant one unreachable
+	// account could consume it and leave every account after it reported as
+	// failing, indistinguishable from a real auth error.
+	ProfileProbeTimeout = 90 * time.Second
+	// ProbeConcurrency is how many accounts are read at once. Each spawns its
+	// own app-server against an isolated copy, so they do not contend; the cap
+	// exists to bound the process count, not for correctness.
+	ProbeConcurrency = 4
+	// ProbeTimeout is retained for callers that want one overall bound.
 	ProbeTimeout = 300 * time.Second
 	// LimitsTTL: Codex quota windows are hourly and weekly, so a stale reading
 	// costs nothing and re-probing every few minutes costs a process per account.
@@ -350,8 +356,9 @@ func (c *Codex) Limits(ctx context.Context) map[string]Usage {
 	if _, err := c.which("codex"); err != nil {
 		return map[string]Usage{}
 	}
-	ctx, cancel := context.WithTimeout(ctx, ProbeTimeout)
-	defer cancel()
+	// No overall deadline here: each account carries ProfileProbeTimeout and at
+	// most ProbeConcurrency run at once, so the batch is already bounded, and a
+	// shared deadline only ever truncated the tail of the list.
 	return shapeLimits(c.Compare(ctx, nil))
 }
 

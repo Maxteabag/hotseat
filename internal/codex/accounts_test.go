@@ -429,7 +429,9 @@ func TestListMarksLiveAndCurrentProfiles(t *testing.T) {
 	if got["live"].Marker() != "*" || got["other"].Marker() != "~" || got["key"].Marker() != " " {
 		t.Fatalf("markers = %+v", got)
 	}
-	if got["key"].Auth != "api-key" || got["live"].Auth != "ok" || got["stale"].Auth != "no-refresh" {
+	// "stored", not "ok": nothing has asked the server whether it still accepts
+	// these credentials.
+	if got["key"].Auth != "api-key" || got["live"].Auth != "stored" || got["stale"].Auth != "no-refresh" {
 		t.Fatalf("auth = %+v", got)
 	}
 	if err := f.profiles.List(); err != nil {
@@ -439,11 +441,14 @@ func TestListMarksLiveAndCurrentProfiles(t *testing.T) {
 	if lines[0] != "   PROFILE          EMAIL                            PLAN     MODE     AUTH" {
 		t.Fatalf("header = %q", lines[0])
 	}
-	if lines[2] != "*  live             live@example.com                 ?        chatgpt  ok" {
+	if lines[2] != "*  live             live@example.com                 ?        chatgpt  stored" {
 		t.Fatalf("row = %q", lines[2])
 	}
-	if lines[len(lines)-2] != "* = matches the live auth.json   ~ = last activated by this tool" {
-		t.Fatalf("footer = %q", lines[len(lines)-2])
+	if lines[len(lines)-4] != "* = matches the live auth.json   ~ = last activated by this tool" {
+		t.Fatalf("footer = %q", lines[len(lines)-4])
+	}
+	if !strings.Contains(f.out.String(), "stored = a refresh token is") {
+		t.Fatalf("the AUTH legend is missing:\n%s", f.out.String())
 	}
 }
 
@@ -720,5 +725,71 @@ func TestProbePrintsAReport(t *testing.T) {
 	err := f.profiles.Probe(context.Background(), "ghost", false)
 	if perr := isProfileError(t, err); perr.Msg != "no credentials found for 'ghost'" {
 		t.Fatalf("message = %q", perr.Msg)
+	}
+}
+
+func TestAStoredRefreshTokenIsNotReportedAsWorking(t *testing.T) {
+	// The file being parseable says nothing about the server still accepting it:
+	// signing in again, or out, revokes the token and leaves the file untouched.
+	f := newProfilesFixture(t)
+	f.write(filepath.Join(f.profiles.ProfilesDir(), "work", "auth.json"), credential("work@example.com", "fixture"))
+	rows, err := f.profiles.ListProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].Auth != "stored" {
+		t.Fatalf("Auth = %q, want \"stored\"", rows[0].Auth)
+	}
+}
+
+func TestARecordedVerdictIsReportedAndExpiresWithTheCredential(t *testing.T) {
+	f := newProfilesFixture(t)
+	auth := filepath.Join(f.profiles.ProfilesDir(), "work", "auth.json")
+	f.write(auth, credential("work@example.com", "fixture"))
+
+	RecordVerdict(f.profiles.ProfilesDir(), "work", "revoked", auth)
+	rows, _ := f.profiles.ListProfiles()
+	if rows[0].Auth != "revoked" {
+		t.Fatalf("Auth = %q, want \"revoked\"", rows[0].Auth)
+	}
+
+	// Signing in again rewrites the credential; the old verdict no longer
+	// describes it and must not be shown.
+	f.write(auth, credential("work@example.com", "signed-in-again"))
+	rows, _ = f.profiles.ListProfiles()
+	if rows[0].Auth != "stored" {
+		t.Fatalf("Auth = %q after a new login, want \"stored\"", rows[0].Auth)
+	}
+}
+
+func TestVerdictsDropProfilesThatNoLongerExist(t *testing.T) {
+	f := newProfilesFixture(t)
+	auth := filepath.Join(f.profiles.ProfilesDir(), "work", "auth.json")
+	other := filepath.Join(f.profiles.ProfilesDir(), "gone", "auth.json")
+	f.write(auth, credential("work@example.com", "fixture"))
+	f.write(other, credential("gone@example.com", "fixture"))
+	RecordVerdict(f.profiles.ProfilesDir(), "gone", "live", other)
+	if err := os.RemoveAll(filepath.Dir(other)); err != nil {
+		t.Fatal(err)
+	}
+	RecordVerdict(f.profiles.ProfilesDir(), "work", "live", auth)
+	if _, ok := ReadVerdicts(f.profiles.ProfilesDir())["gone"]; ok {
+		t.Fatal("verdict for a removed profile was kept")
+	}
+}
+
+func TestVerdictsNeverHoldTokenMaterial(t *testing.T) {
+	f := newProfilesFixture(t)
+	auth := filepath.Join(f.profiles.ProfilesDir(), "work", "auth.json")
+	f.write(auth, credential("work@example.com", "fixture"))
+	RecordVerdict(f.profiles.ProfilesDir(), "work", "live", auth)
+	raw, err := os.ReadFile(filepath.Join(f.profiles.ProfilesDir(), ".verdicts.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"refresh", "access_token", "id_token", "test-refresh"} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("verdicts file mentions %q: %s", secret, raw)
+		}
 	}
 }
