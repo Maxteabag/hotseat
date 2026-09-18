@@ -29,6 +29,8 @@ type Account struct {
 	Windows           []Window `json:"windows"`
 	Error             string   `json:"error"`
 	CheckedAt         float64  `json:"checked_at"`
+	// NoResetReason: the reset shown for this account will not unblock it.
+	NoResetReason string `json:"no_reset_reason"`
 }
 
 func (a Account) Name() string {

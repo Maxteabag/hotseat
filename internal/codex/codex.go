@@ -294,6 +294,8 @@ type Usage struct {
 	Reset       *float64      `json:"reset"`
 	ResetWindow *string       `json:"reset_window"`
 	Windows     []UsageWindow `json:"windows"`
+	// NoResetReason is set when Reset will not unblock the account.
+	NoResetReason string `json:"no_reset_reason,omitempty"`
 }
 
 // limitsCache is (fetched_at, result). Process-local, so a CLI run never
@@ -369,6 +371,7 @@ func shapeLimits(rows []Row) map[string]Usage {
 			continue
 		}
 		usage.Reset = row.ResetsAt
+		usage.NoResetReason = row.NoResetReason
 		window := row.SoonestWindow
 		usage.ResetWindow = &window
 		var worst *float64

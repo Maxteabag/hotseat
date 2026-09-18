@@ -268,6 +268,30 @@ type Row struct {
 	SoonestWindow string   `json:"soonest_window"`
 	Windows       []Window `json:"windows"`
 	ResetCredits  float64  `json:"reset_credits"`
+	// NoResetReason is set when the reset above will not unblock the account.
+	NoResetReason string `json:"no_reset_reason,omitempty"`
+}
+
+// NoResetReason names why a blocked account will not recover when its window
+// resets, or "" when waiting for the reset is the right advice.
+//
+// The server reports two independent things: a used-percent window with a
+// resetsAt, and why usage was actually refused. A workspace whose credits are
+// depleted still has a weekly window that rolls over, and rolling over does not
+// add credits. Showing only the reset tells the user to wait for a moment that
+// will not unblock them.
+//
+// Keyed on rateLimitReachedType alone. The credits object is not a usable
+// signal: an ordinary rate-limited Pro account also reports hasCredits false.
+func NoResetReason(reachedType string) string {
+	// Kept short: this is rendered in a fixed-width status column.
+	switch reachedType {
+	case "workspace_owner_credits_depleted", "credits_depleted", "account_credits_depleted":
+		return "no credits"
+	case "spend_control_reached":
+		return "spend cap"
+	}
+	return ""
 }
 
 func window(value any) *Window {
@@ -326,7 +350,12 @@ func summarize(name, email string, payload json.RawMessage) Row {
 			}
 		}
 	}
+	reached := stringOf(bucket.get("rateLimitReachedType"))
 	blocked := truthy(bucket.get("rateLimitReachedType")) || truthy(bucket.get("spendControlReached"))
+	noReset := NoResetReason(reached)
+	if noReset == "" && truthy(bucket.get("spendControlReached")) {
+		noReset = NoResetReason("spend_control_reached")
+	}
 	usable := false
 	for _, w := range windows {
 		if *w.UsedPercent < 100 {
@@ -356,6 +385,7 @@ func summarize(name, email string, payload json.RawMessage) Row {
 		ResetDisplay:  "-",
 		SoonestWindow: "-",
 		Windows:       windows,
+		NoResetReason: noReset,
 	}
 	if soonest != nil {
 		row.ResetsAt = soonest.ResetsAt

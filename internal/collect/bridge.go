@@ -298,6 +298,7 @@ func (b *Bridge) codexRows(ctx context.Context, refresh bool) ([]Row, string) {
 			for _, w := range limits.Windows {
 				row.Windows = append(row.Windows, tui.Window{Label: w.Label, Used: w.Used, Reset: deref(w.Reset)})
 			}
+			row.NoResetReason = limits.NoResetReason
 			if limits.Error != nil && *limits.Error != "" {
 				row.Error = *limits.Error
 			} else {

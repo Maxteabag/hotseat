@@ -12,6 +12,10 @@ import (
 )
 
 // cmdCodex shows Codex accounts and their quota, alongside the Claude ones.
+// statusWidth is the STATUS column; the widest word it must hold is a block
+// reason such as "no credits".
+const statusWidth = 10
+
 func (a *app) cmdCodex(cmd *command, ctx context.Context, args []string) (int, error) {
 	fs := a.flags(cmd)
 	asJSON := jsonFlag(cmd, fs)
@@ -34,7 +38,7 @@ func (a *app) cmdCodex(cmd *command, ctx context.Context, args []string) (int, e
 		return 1, nil
 	}
 
-	a.printf("%s %s  %s %s  ACCOUNT\n", leftPad("PROFILE", 14), rightPad("WORST", 6), leftPad("STATUS", 9), rightPad("TOKEN", 9))
+	a.printf("%s %s  %s %s  ACCOUNT\n", leftPad("PROFILE", 14), rightPad("WORST", 6), leftPad("STATUS", statusWidth), rightPad("TOKEN", 9))
 	for _, entry := range entries {
 		usage := entry.Usage
 		used := "—"
@@ -49,6 +53,10 @@ func (a *app) cmdCodex(cmd *command, ctx context.Context, args []string) (int, e
 			word, colour = "unknown", dim
 		case usage.Usable:
 			word, colour = "usable", green
+		case usage.NoResetReason != "":
+			// Blocked by something the reset does not clear; naming it stops the
+			// reset time from reading as "back at that time".
+			word, colour = usage.NoResetReason, red
 		default:
 			word, colour = "blocked", red
 		}
@@ -72,8 +80,11 @@ func (a *app) cmdCodex(cmd *command, ctx context.Context, args []string) (int, e
 		if !entry.Saved {
 			name = "live (unsaved)"
 		}
+		// The status word is coloured, so it is padded here rather than by leftPad,
+		// which would count the escape sequence. A word wider than the column
+		// simply gets no padding; it must never ask for a negative Repeat.
 		a.printf("%s%s %s  %s%s %s  %s\n", marker, leftPad(name, 13), rightPad(used, 6), a.paint(word, colour),
-			strings.Repeat(" ", 9-len(word)), rightPad(token, 9), deref(entry.Email, "?"))
+			strings.Repeat(" ", max(0, statusWidth-runeLen(word))), rightPad(token, 9), deref(entry.Email, "?"))
 	}
 
 	a.println()

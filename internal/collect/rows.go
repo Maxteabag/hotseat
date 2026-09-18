@@ -25,7 +25,9 @@ type Row struct {
 	CanLaunch bool
 	Windows   []tui.Window
 	Error     string
-	CheckedAt float64
+	// NoResetReason: the reset shown for this row will not unblock it.
+	NoResetReason string
+	CheckedAt     float64
 
 	// Claude only.
 	RateLimitTier *string
@@ -103,6 +105,7 @@ func (r Row) Account() tui.Account {
 		Provider: r.Provider, Alias: r.Alias, Email: r.Email, Plan: r.Plan, RateLimitTier: tier,
 		Workspace: r.Workspace, Active: r.Active, Saved: r.Saved, CanSwitch: r.CanSwitch,
 		CanLaunch: r.CanLaunch, Limited: r.Limited, Windows: windows, Error: r.Error, CheckedAt: r.CheckedAt,
+		NoResetReason: r.NoResetReason,
 	}
 }
 

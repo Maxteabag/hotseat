@@ -110,6 +110,15 @@ func resetCell(q *Window, now time.Time) string {
 	date, left := resetText(q.Reset, now)
 	return ink(date+" · "+left, muted)
 }
+
+// resetOrReason replaces the countdown when the reset will not unblock the
+// account: waiting for it is the wrong advice, so the reason is shown instead.
+func resetOrReason(a Account, q *Window, now time.Time) string {
+	if a.NoResetReason != "" {
+		return ink(a.NoResetReason+" · no reset", red)
+	}
+	return resetCell(q, now)
+}
 func (m *Model) overview(w, h int) string {
 	if m.provider == 2 {
 		return m.claudeOverview(w, h)
@@ -156,7 +165,7 @@ func (m *Model) overview(w, h int) string {
 		}
 		q := codexWeekly(a)
 		if wide {
-			all = append(all, line{fit(label, accountW) + fit(quotaCell(q, min(36, quotaW-2)), quotaW) + fit(resetCell(q, now), resetW) + creditText(a), i})
+			all = append(all, line{fit(label, accountW) + fit(quotaCell(q, min(36, quotaW-2)), quotaW) + fit(resetOrReason(a, q, now), resetW) + creditText(a), i})
 			all = append(all, line{accountMeta(a, 0), i})
 		} else {
 			all = append(all, line{fit(label, accountW) + "Resets " + creditText(a), i}, line{" " + quotaCell(q, min(36, inner-2)), i}, line{" " + resetCell(q, now), i})

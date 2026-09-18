@@ -517,3 +517,59 @@ func TestFormatRowsListsWindows(t *testing.T) {
 		t.Fatalf("out = %q", out)
 	}
 }
+
+// rateLimitPayload is the shape the server returns, reduced to the fields that
+// decide whether the reset is worth waiting for.
+func rateLimitPayload(reachedType string, hasCredits bool) json.RawMessage {
+	bucket := map[string]any{
+		"limitId":              "codex",
+		"primary":              map[string]any{"usedPercent": 100, "windowDurationMins": 10080, "resetsAt": 1789822714},
+		"secondary":            nil,
+		"credits":              map[string]any{"hasCredits": hasCredits, "unlimited": false},
+		"spendControlReached":  false,
+		"planType":             "self_serve_business_prolite",
+		"rateLimitReachedType": reachedType,
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"ordinaryUsageAllowed": false,
+		"rateLimits":           bucket,
+		"rateLimitsByLimitId":  map[string]any{"codex": bucket},
+		"accountId":            "acc-1",
+	})
+	return raw
+}
+
+func TestDepletedCreditsAreNotReportedAsWaitingForTheReset(t *testing.T) {
+	// A workspace out of credits still has a weekly window that rolls over, and
+	// rolling over does not add credits. Showing only the reset tells the user to
+	// wait for a moment that will not unblock them.
+	row := summarize("ecit", "work@example.com", rateLimitPayload("workspace_owner_credits_depleted", false))
+	if !row.Blocked {
+		t.Fatal("row should be blocked")
+	}
+	if row.NoResetReason != "no credits" {
+		t.Fatalf("NoResetReason = %q", row.NoResetReason)
+	}
+	if row.ResetsAt == nil {
+		t.Fatal("the window reset is still reported, it just is not the answer")
+	}
+}
+
+func TestAnOrdinaryRateLimitKeepsItsResetAdvice(t *testing.T) {
+	// hasCredits is false here too: a rate-limited Pro account reports it that
+	// way, so only rateLimitReachedType can tell the two states apart.
+	row := summarize("personal", "me@example.com", rateLimitPayload("rate_limit_reached", false))
+	if !row.Blocked {
+		t.Fatal("row should be blocked")
+	}
+	if row.NoResetReason != "" {
+		t.Fatalf("NoResetReason = %q, want empty: this account does come back at the reset", row.NoResetReason)
+	}
+}
+
+func TestAnUnknownBlockReasonDoesNotClaimTheResetIsUseless(t *testing.T) {
+	row := summarize("new", "me@example.com", rateLimitPayload("some_future_reason", false))
+	if row.NoResetReason != "" {
+		t.Fatalf("NoResetReason = %q, want empty for an unrecognised reason", row.NoResetReason)
+	}
+}
