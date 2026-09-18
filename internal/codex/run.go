@@ -153,6 +153,30 @@ func atomicWrite(target string, payload []byte) error {
 	return os.Rename(name, target)
 }
 
+// preserveRefreshed copies a credential back over its source when the probe
+// rotated it.
+//
+// A probe runs Codex against a throwaway copy, and Codex refreshes the token in
+// place. OpenAI rotates the refresh token on every refresh and revokes the
+// previous one, so a rotated credential left in the copy is not a lost reading:
+// it locks the account out until the user signs in again. It is therefore
+// written back whether or not the probe itself succeeded.
+func preserveRefreshed(temporary, source string) {
+	fresh, err := os.ReadFile(temporary)
+	if err != nil {
+		return
+	}
+	original, err := os.ReadFile(source)
+	if err != nil || bytes.Equal(fresh, original) {
+		return
+	}
+	if err := atomicWrite(source, fresh); err != nil {
+		// The rotated token exists only in the temp copy that is about to be
+		// removed; say so rather than lock the account out silently.
+		Warn(fmt.Sprintf("hotseat: could not store the refreshed Codex token for %s: %v", source, err))
+	}
+}
+
 // copyFile copies bytes and mode, like shutil.copy.
 func copyFile(source, target string) error {
 	info, err := os.Stat(source)

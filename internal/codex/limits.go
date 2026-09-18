@@ -2,7 +2,6 @@ package codex
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -228,23 +227,18 @@ func (c *Codex) readProfile(ctx context.Context, auth string) (json.RawMessage, 
 	}
 	client, err := openRPC(ctx, spawn, isolatedEnv(probeDir), timeout)
 	if err != nil {
+		// Opening the server is enough to refresh the token, so write back first.
+		preserveRefreshed(tempAuth, auth)
 		return nil, err
 	}
-	result, err := client.call(ctx, "account/rateLimits/read", nil)
+	result, callErr := client.call(ctx, "account/rateLimits/read", nil)
 	client.close()
-	if err != nil {
-		return nil, err
-	}
-	// Refreshed tokens are written back so the profile stays usable. Failing to
-	// compare or copy is not a probe failure.
-	if fresh, readErr := os.ReadFile(tempAuth); readErr == nil {
-		if original, readErr := os.ReadFile(auth); readErr == nil && !bytes.Equal(fresh, original) {
-			if err := atomicCopy(tempAuth, auth); err != nil {
-				// The rotated token exists only in the temp copy that is about to be
-				// removed; say so rather than lock the account out silently.
-				Warn(fmt.Sprintf("hotseat: could not store the refreshed Codex token for %s: %v", auth, err))
-			}
-		}
+	// Refreshed tokens are written back so the profile stays usable, including
+	// when the reading failed: the rotation already happened and the old token is
+	// already revoked. Failing to compare or copy is not a probe failure.
+	preserveRefreshed(tempAuth, auth)
+	if callErr != nil {
+		return nil, callErr
 	}
 	return result, nil
 }

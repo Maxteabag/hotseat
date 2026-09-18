@@ -258,8 +258,16 @@ func (c *Codex) Accounts() []Account {
 		isLive := live != nil && identity.AccountID != nil && *identity.AccountID != "" &&
 			ptrEqual(identity.AccountID, live.AccountID) && ptrEqual(identity.Email, live.Email)
 		anyActive = anyActive || isLive
+		reported := *identity
+		if isLive {
+			// Codex refreshes auth.json in place, so the saved copy of the account
+			// in use can hold a superseded token. It is the same account either
+			// way; report the credential actually being used rather than a stale
+			// expiry for an account that is signed in.
+			reported = *live
+		}
 		found = append(found, Account{Provider: "codex", Alias: name, IsActive: isLive,
-			Saved: true, Identity: *identity})
+			Saved: true, Identity: reported})
 	}
 	if live != nil && !anyActive {
 		found = append([]Account{{Provider: "codex", Alias: LiveName, IsActive: true,
@@ -426,7 +434,15 @@ func (c *Codex) Overview(ctx context.Context, withLimits bool, maxAge time.Durat
 		if entry.Saved {
 			key = entry.Alias
 		}
-		if usage, ok := quota[key]; ok {
+		usage, ok := quota[key]
+		// Same reason: a reading taken from a superseded copy of the active
+		// account reports a revoked token for an account that is signed in.
+		if entry.Saved && entry.IsActive {
+			if fromLive, found := quota[LiveName]; found {
+				usage, ok = fromLive, true
+			}
+		}
+		if ok {
 			copied := usage
 			entry.Usage = &copied
 		}

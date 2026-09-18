@@ -287,6 +287,30 @@ func TestARefreshedTokenIsWrittenBackToTheProfile(t *testing.T) {
 	}
 }
 
+func TestARefreshedTokenIsWrittenBackEvenWhenTheReadingFails(t *testing.T) {
+	// Codex refreshes the token before it answers. If the answer then fails and
+	// the rotated credential is dropped, the profile keeps a refresh token the
+	// server has already revoked and the account is locked out.
+	f := newLimitsFixture(t)
+	refreshed := creds("work@example.com", "work-refreshed")
+	f.server.handler = func(env []string, msg map[string]any) any {
+		if msg["method"] == "account/rateLimits/read" {
+			_ = os.WriteFile(filepath.Join(envValue(env, "CODEX_HOME"), "auth.json"), refreshed, 0o600)
+			return map[string]any{"id": msg["id"], "error": map[string]any{"code": -32603, "message": "401 Unauthorized"}}
+		}
+		return replay(func([]string) any { return packagedHelperPayload() })(env, msg)
+	}
+	for _, row := range f.codex.Compare(context.Background(), []string{"work"}) {
+		if row.Name == "work" && row.Error == nil {
+			t.Fatalf("work row = %+v, want an error row", row)
+		}
+	}
+	got, _ := os.ReadFile(filepath.Join(f.codex.ProfilesDir(), "work", "auth.json"))
+	if string(got) != string(refreshed) {
+		t.Fatalf("profile auth = %s, want the rotated credential", got)
+	}
+}
+
 func TestAnRPCErrorBecomesAnErrorRow(t *testing.T) {
 	f := newLimitsFixture(t)
 	f.server.handler = func(env []string, msg map[string]any) any {

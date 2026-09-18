@@ -440,3 +440,55 @@ func TestOverviewUsesTheCacheWhenAMaxAgeIsGiven(t *testing.T) {
 		t.Fatalf("calls = %d", calls)
 	}
 }
+
+func TestTheActiveProfileIsReportedFromTheLiveCredential(t *testing.T) {
+	// Codex refreshes auth.json in place, so the saved copy of the account in use
+	// lags behind. Reporting the stale copy says "expired" about a live login.
+	f := newAccountsFixture(t)
+	f.write(f.profile("work"), "work@example.com", "acc-1", past)
+	f.write(f.codex.LiveAuth(), "work@example.com", "acc-1", future)
+	accounts := f.codex.Accounts()
+	if len(accounts) != 1 || !accounts[0].IsActive {
+		t.Fatalf("accounts = %+v", accounts)
+	}
+	if got := *accounts[0].TokenExpiresAt; got != future {
+		t.Fatalf("TokenExpiresAt = %v, want the live %v", got, future)
+	}
+}
+
+func TestAnInactiveProfileKeepsItsOwnExpiry(t *testing.T) {
+	f := newAccountsFixture(t)
+	f.write(f.profile("other"), "other@example.com", "acc-2", past)
+	f.write(f.codex.LiveAuth(), "work@example.com", "acc-1", future)
+	for _, account := range f.codex.Accounts() {
+		if account.Alias != "other" {
+			continue
+		}
+		if got := *account.TokenExpiresAt; got != past {
+			t.Fatalf("TokenExpiresAt = %v, want its own %v", got, past)
+		}
+		return
+	}
+	t.Fatal("profile 'other' missing")
+}
+
+func TestTheActiveProfileTakesTheLiveQuotaReading(t *testing.T) {
+	f := newAccountsFixture(t)
+	f.write(f.profile("work"), "work@example.com", "acc-1", future)
+	f.write(f.codex.LiveAuth(), "work@example.com", "acc-1", future)
+	revoked, quarter := "refresh token was revoked", 0.25
+	f.codex.limitsFn = func(context.Context) map[string]Usage {
+		return map[string]Usage{
+			"work":   {Error: &revoked},
+			LiveName: {Usable: true, WorstUsed: &quarter},
+		}
+	}
+	overview, err := f.codex.Overview(context.Background(), true, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage := overview.Accounts[0].Usage
+	if usage == nil || usage.Error != nil || !usage.Usable {
+		t.Fatalf("usage = %+v, want the live reading", usage)
+	}
+}

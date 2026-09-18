@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -581,20 +580,15 @@ func (p *Profiles) ProbeCredentials(ctx context.Context, authPath, profileName s
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	proc, err := p.run(runCtx, probeArgv(), isolatedEnv(probeDir))
-	if err != nil {
-		return ProbeResult{Status: "error", Email: &email, Error: err.Error()}
-	}
+	proc, runErr := p.run(runCtx, probeArgv(), isolatedEnv(probeDir))
 
-	// Preserve refreshed tokens if any.
-	if fresh, readErr := os.ReadFile(tempAuth); readErr == nil {
-		if original, readErr := os.ReadFile(authPath); readErr == nil && !bytes.Equal(fresh, original) {
-			if err := atomicCopy(tempAuth, authPath); err != nil {
-				// The rotated token exists only in the temp copy that is about to be
-				// removed; say so rather than lock the account out silently.
-				Warn(fmt.Sprintf("hotseat: could not store the refreshed Codex token for %s: %v", authPath, err))
-			}
-		}
+	// Preserve refreshed tokens if any, including after a failed run: the probe
+	// may have rotated the credential before it failed, and the token it replaced
+	// is already revoked.
+	preserveRefreshed(tempAuth, authPath)
+
+	if runErr != nil {
+		return ProbeResult{Status: "error", Email: &email, Error: runErr.Error()}
 	}
 
 	credits := func() map[string]any { return FetchResetCredits(ctx, p.HTTP, authPath) }
