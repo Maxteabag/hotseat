@@ -137,6 +137,27 @@ Add `hotseat statusline` to Claude Code's `statusLine` setting and a pinned
 session names its account. A session on the shared configuration says
 `default`, so the two are never confused.
 
+### Switching automatically
+
+`hotseat auto` moves the default account off one that is out of quota. It leaves
+the account when it is limited or a window reaches `--threshold` (95%), then
+picks the emptiest other account that has a live sign-in and no blocked model,
+calls the API to confirm it works, and switches. If none qualifies it changes
+nothing and exits 1.
+
+```bash
+hotseat auto --dry-run            # say what it would do
+hotseat auto --watch              # keep checking every --interval (2m)
+```
+
+A switch is followed by a ten-minute cooldown, and a lock stops two passes
+switching at once. Like `hotseat switch`, it retargets every running session on
+the shared configuration; pinned `hotseat use` sessions are not touched.
+
+For Clarp, set `claude_account_switch_command = ["hotseat", "auto", "--select"]`.
+It reads `{"models": [...]}` on stdin and prints `{"available", "profile",
+"models"}`.
+
 ### Expired tokens and sign-in deadlines
 
 A Claude access token lives about eight hours. A pinned session renews its own
