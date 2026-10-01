@@ -162,3 +162,11 @@ func TestAutoRefusesWithoutAnActiveAccount(t *testing.T) {
 		t.Errorf("exit %d, switched %v", code, *switched)
 	}
 }
+
+func TestAutoSaysHowManySessionsKeepTheOldAccount(t *testing.T) {
+	h, _ := autoHarness(t, autoView("a", true, 1.0, 0.8), autoView("b", false, 0.1, 0.1))
+	h.run("auto")
+	if !strings.Contains(h.out.String(), "2 running session(s) keep a") {
+		t.Errorf("out %q", h.out.String())
+	}
+}

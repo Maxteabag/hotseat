@@ -129,7 +129,7 @@ rotated value. Pinned Codex sessions work the same way, using the saved profile
 directory as their `CODEX_HOME`.
 
 `hotseat switch <alias>` rewrites the shared credential file that every running
-process reads, retargeting all of them mid-conversation. It counts those
+process reads, which running processes are not guaranteed to pick up. It counts those
 sessions and asks before proceeding; without a terminal it refuses unless given
 `--yes`.
 
@@ -151,8 +151,13 @@ hotseat auto --watch              # keep checking every --interval (2m)
 ```
 
 A switch is followed by a ten-minute cooldown, and a lock stops two passes
-switching at once. Like `hotseat switch`, it retargets every running session on
-the shared configuration; pinned `hotseat use` sessions are not touched.
+switching at once.
+
+It changes the default for sessions that start afterwards. A session already
+running keeps the account it loaded until it restarts, and `auto` never kills
+an interactive session: it reports how many are still running, and
+`hotseat resume --go` continues any that a limit stops, on the new account.
+Pinned `hotseat use` sessions are untouched.
 
 For Clarp, set `claude_account_switch_command = ["hotseat", "auto", "--select"]`.
 It reads `{"models": [...]}` on stdin and prints `{"available", "profile",

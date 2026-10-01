@@ -26,6 +26,9 @@ type autoDecision struct {
 	To     string   `json:"to,omitempty"`
 	Reason string   `json:"reason,omitempty"`
 	Tried  []string `json:"tried,omitempty"`
+	// Running is how many sessions were open at the switch. They keep the old
+	// account until restarted.
+	Running int `json:"running,omitempty"`
 }
 
 // canServe reports whether view can take work for models: not blocked on any of
@@ -134,7 +137,7 @@ func (a *app) autoPass(ctx context.Context, models []string, threshold float64, 
 		if _, err := a.switchDefault(backend, alias, snap.Sessions); err != nil {
 			return decision, err
 		}
-		decision.Action, decision.To = "switched", alias
+		decision.Action, decision.To, decision.Running = "switched", alias, snap.Sessions
 		return decision, nil
 	}
 	decision.Action = "stuck"
@@ -252,6 +255,9 @@ func (a *app) reportAuto(d autoDecision, asJSON, selector bool, models []string)
 		a.println(a.paint(fmt.Sprintf("✓ %s has quota; nothing to do", d.From), green))
 	case d.Action == "switched":
 		a.println(a.paint(fmt.Sprintf("✓ %s is %s; default is now %s", d.From, d.Reason, d.To), green))
+		if d.Running > 0 {
+			a.println(fmt.Sprintf("  %d running session(s) keep %s until restarted; `hotseat resume --go` continues any a limit stops", d.Running, d.From))
+		}
 	case d.Action == "would_switch":
 		a.println(fmt.Sprintf("%s is %s; would switch to %s", d.From, d.Reason, d.To))
 	default:
