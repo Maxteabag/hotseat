@@ -2,6 +2,7 @@ package work
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -93,36 +94,56 @@ func DefaultProjectsDir() string {
 	return filepath.Join(home, ".claude", "projects")
 }
 
-// LastEntries is the tail of a transcript, parsed. Transcripts are large, so the
-// file is read once; the buffer is trimmed whenever it grows past keep*8.
+// LastEntries reads backwards until it has the requested valid records. Old
+// history must not make account readiness wait on a whole-transcript scan.
 func LastEntries(path string, keep int) []Entry {
+	if keep <= 0 {
+		return nil
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil
+	}
+	pos := info.Size()
+	var pending []byte
 	var entries []Entry
-	reader := bufio.NewReader(file)
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			if entry, ok := parseLine(line); ok {
+	for pos > 0 {
+		size := int64(64 * 1024)
+		if pos < size {
+			size = pos
+		}
+		pos -= size
+		block := make([]byte, int(size))
+		if _, err := file.ReadAt(block, pos); err != nil {
+			return nil
+		}
+		block = append(block, pending...)
+		end := len(block)
+		for {
+			i := bytes.LastIndexByte(block[:end], '\n')
+			if i < 0 {
+				break
+			}
+			if entry, ok := parseLine(block[i+1 : end]); ok {
 				entries = append(entries, entry)
+				if len(entries) == keep {
+					slices.Reverse(entries)
+					return entries
+				}
 			}
-			if len(entries) > keep*8 {
-				entries = entries[keep*4:]
-			}
+			end = i
 		}
-		if err != nil {
-			if err != io.EOF {
-				return nil
-			}
-			break
-		}
+		pending = block[:end]
 	}
-	if len(entries) > keep {
-		entries = entries[len(entries)-keep:]
+	if entry, ok := parseLine(pending); ok {
+		entries = append(entries, entry)
 	}
+	slices.Reverse(entries)
 	return entries
 }
 

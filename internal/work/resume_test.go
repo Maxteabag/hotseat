@@ -179,6 +179,28 @@ func TestLastEntriesKeepsATailOfALongTranscript(t *testing.T) {
 	}
 }
 
+func TestLastEntriesKeepsLongAndUnterminatedRecordsAcrossBlocks(t *testing.T) {
+	dir := t.TempDir()
+	long := strings.Repeat("x", 150000)
+	path := writeTranscript(t, dir, "blocks", map[string]any{"type": "user", "text": "old"}, map[string]any{"type": "assistant", "text": long})
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString("\nnot json\n{\"type\":\"user\",\"text\":\"latest\"}")
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := LastEntries(path, 2)
+	if len(got) != 2 || got[0]["text"] != long || got[1]["text"] != "latest" {
+		t.Fatal("long record, invalid line, or final unterminated record lost")
+	}
+	if got := LastEntries(path, 0); len(got) != 0 {
+		t.Fatal("zero-sized tail must be empty")
+	}
+}
+
 func TestDecodeProjectDir(t *testing.T) {
 	if got := DecodeProjectDir("-a-b-c"); got != "/a/b/c" {
 		t.Fatalf("got %q", got)
