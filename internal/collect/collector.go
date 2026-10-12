@@ -321,7 +321,10 @@ func (c *Collector) extensions(ctx context.Context, views []AccountView) map[str
 		if extension == nil || !extension.Available() {
 			continue
 		}
-		result, err := extension.Snapshot(ctx, accounts, defaultAlias)
+		// Optional work details must not starve already-collected quota results.
+		integrationCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		result, err := extension.Snapshot(integrationCtx, accounts, defaultAlias)
+		cancel()
 		if err != nil {
 			out[name] = map[string]any{"error": err.Error()}
 			continue
