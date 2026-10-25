@@ -22,6 +22,7 @@ import (
 	"github.com/Maxteabag/hotseat/internal/claude"
 	"github.com/Maxteabag/hotseat/internal/codex"
 	"github.com/Maxteabag/hotseat/internal/collect"
+	"github.com/Maxteabag/hotseat/internal/muse"
 	"github.com/Maxteabag/hotseat/internal/quota"
 	"github.com/Maxteabag/hotseat/internal/version"
 	"github.com/Maxteabag/hotseat/internal/work"
@@ -73,6 +74,8 @@ type app struct {
 	launchCommand func(argv []string, cwd string) (claude.LaunchCommandResult, error)
 	balances      func(ctx context.Context, aliases []string) ([]codex.Balance, error)
 	codexAccount  func(ctx context.Context, request codexAccountRequest) error
+
+	museOverview func(ctx context.Context) (*muse.Overview, error)
 
 	clarpAvailable func() bool
 	stopped        func(ctx context.Context, days int) ([]work.StoppedItem, error)
@@ -135,6 +138,9 @@ func newApp() *app {
 		modelUsage: func(days int) *claude.ModelSummary { return claude.RecentByModel(days, "", time.Time{}) },
 		statusline: func() string { return claude.Render("") },
 
+		museOverview: func(ctx context.Context) (*muse.Overview, error) {
+			return (&muse.Muse{}).Overview(ctx)
+		},
 		codexOverview: func(ctx context.Context, withLimits bool) (*codex.Overview, error) {
 			return codexHome().Overview(ctx, withLimits, 0)
 		},
@@ -242,6 +248,7 @@ var commands = []command{
 	{"resets", "Read available Codex usage-reset credits (no redemption)", true, "[aliases ...]", (*app).cmdResets},
 	{"codex-account", "Codex profiles: list, current, save, switch, login, verify, probe, remove", false, "...", (*app).cmdCodexAccount},
 	{"codex", "Codex accounts and their quota", true, "", (*app).cmdCodex},
+	{"muse", "Meta Muse Code account and its allowance", true, "", (*app).cmdMuse},
 	{"statusline", "Print the current account, for a status line", false, "", (*app).cmdStatusline},
 	{"clarp", "Clarp agents and account usage", true, "", (*app).cmdClarp},
 }
@@ -353,7 +360,7 @@ var extraUsage = map[string][]string{
 func (a *app) printHelp(w io.Writer) {
 	fmt.Fprint(w, topUsage())
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Inspect and use the Claude Code and Codex accounts on this machine.")
+	fmt.Fprintln(w, "Inspect and use the Claude Code, Codex and Muse Code accounts on this machine.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "positional arguments:")
 	fmt.Fprintf(w, "  {%s}\n", strings.Join(commandNames(), ","))
