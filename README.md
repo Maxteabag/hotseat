@@ -1,7 +1,7 @@
 # Hotseat
 
-A terminal dashboard and CLI for the Claude Code and Codex accounts on your
-machine. It shows how much quota each account has left, when every window
+A terminal dashboard and CLI for the Claude Code, Codex and Muse Code accounts
+on your machine. It shows how much quota each account has left, when every window
 resets, which account your sessions are using, and which conversations a usage
 limit stopped, so you can pick them up again on an account that still has room.
 
@@ -47,8 +47,8 @@ bin/hotseat tui --demo   # synthetic accounts, no network, no actions
 
 ## The terminal interface
 
-Built with Bubble Tea v2, Bubbles and Lip Gloss. Two tabs, one per provider,
-and a separate Work screen so the account view stays uncluttered.
+Built with Bubble Tea v2, Bubbles and Lip Gloss. One tab per provider, and a
+separate Work screen so the account view stays uncluttered.
 
 **Codex** shows each saved profile's weekly quota bar, the reset date with a
 countdown, and how many usage-reset credits the account has available. The
@@ -58,6 +58,10 @@ current default account is drawn in yellow.
 and the 7-day Fable window, each with its own reset time. The plan label carries
 the subscription multiplier from the account's own metadata, so **Max 5×**,
 **Max 20×** and **Team 5×** are told apart.
+
+**Muse** (key `3`) shows the Meta Muse Code subscription: its weekly allowance
+bar with the reset countdown, and in the account details both the 5-hour and the
+weekly window. The tab appears empty when Muse Code is not signed in.
 
 ![Hotseat: Claude accounts with 5-hour, weekly and Fable weekly quota bars](docs/tui-claude.png)
 
@@ -99,6 +103,7 @@ Every reporting subcommand takes `--json`, so anything the TUI shows can be scri
 ```bash
 hotseat list                    # Claude accounts: quota, status, sign-in deadline
 hotseat codex                   # Codex accounts and their quota
+hotseat muse                    # Muse Code plan and its 5-hour and weekly allowance
 hotseat show work               # everything known about one account
 hotseat verify work             # one minimal request to prove the account works
 hotseat use work                # run a session pinned to that account, here
@@ -192,6 +197,30 @@ and a running session reads credentials once at startup, so switching accounts
 never reaches it. `hotseat reboot` terminates the holder gently, waits for the
 lock to clear, then resumes the same conversation on the current account.
 
+## Muse Code
+
+[Muse Code](https://dev.meta.ai/products/muse-code) is Meta's terminal coding
+agent. Its `muse` CLI keeps one signed-in Meta account in
+`~/.config/muse/auth.json` (`MUSE_CONFIG_DIR` overrides the directory). Hotseat
+reads the email, name and subscription flag from that file and never the tokens.
+
+```bash
+$ hotseat muse
+*you@example.com  Muse Code Power Usage
+ WINDOW     USED  RESETS
+ 5-hour      12%  14:25
+ weekly       3%  Mon 01:00
+```
+
+The allowance comes from `muse usage --json`, which makes no model turn. Meta
+publishes no usage endpoint for Muse Code; the CLI derives the allowance from
+what the server returns on its own requests, so asking the CLI is the one stable
+reading and keeps the credential inside it. Before the first request in a new
+window the server sends no figures; Hotseat shows that reason instead of a
+fake 0%. Hotseat looks for `muse` on `PATH` and in `~/.local/bin`, where Meta's
+installer puts it. Switching and launching are not offered: Muse Code has one
+account per machine.
+
 ## Continuing work a limit stopped
 
 Hitting a limit does not fail in a way you can act on later. A terminal session
@@ -229,7 +258,8 @@ Claude apps use. It costs no inference, still answers while the account is rate
 limited, and reports per-model weekly limits. A header-probe fallback exists for
 when that endpoint is unavailable; an account served by it says so, because the
 fallback cannot see per-model limits. Codex quota comes from the `codex`
-app-server's own rate-limit report. Details are in
+app-server's own rate-limit report. Muse Code quota comes from
+`muse usage --json` (see [Muse Code](#muse-code)). Details are in
 [docs/quota-data.md](docs/quota-data.md).
 
 Access tokens are never written to a response body, a log line or a command
