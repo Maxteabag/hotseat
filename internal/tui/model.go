@@ -150,7 +150,8 @@ func (m *Model) filtered() []Account {
 	out := []Account{}
 	query := strings.ToLower(m.filter.Value())
 	for _, a := range m.data.Accounts {
-		if m.provider == 1 && a.Provider != "codex" || m.provider == 2 && a.Provider != "claude" {
+		if m.provider == 1 && a.Provider != "codex" || m.provider == 2 && a.Provider != "claude" ||
+			m.provider == 3 && a.Provider != "muse" {
 			continue
 		}
 		if !strings.Contains(strings.ToLower(a.Name()+" "+strings.Join(a.Aliases, " ")+" "+a.Email+" "+a.Provider+" "+a.Workspace), query) {
@@ -329,6 +330,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key {
 		case "w":
 			m.workMode = true
+			if m.provider == 3 {
+				// Muse Code has no stopped-work history yet; the work desk covers Codex and Claude.
+				m.provider = 1
+			}
 			return m, m.loadWork()
 		case "q":
 			return m, tea.Quit
@@ -341,7 +346,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filter.SetValue("")
 			m.focus = 0
 			m.scroll = 0
-		case "1", "2":
+		case "1", "2", "3":
 			m.provider = int(key[0] - '0')
 			m.tableOffset = 0
 			m.cursor = 0
@@ -467,7 +472,7 @@ func (m *Model) View() tea.View {
 		v.AltScreen = true
 		return v
 	}
-	tabs := []string{"[1] Codex", "[2] Claude"}
+	tabs := []string{"[1] Codex", "[2] Claude", "[3] Muse"}
 	for i := range tabs {
 		if i+1 == m.provider {
 			tabs[i] = ink(tabs[i], accent)
@@ -486,7 +491,7 @@ func (m *Model) View() tea.View {
 	}
 	var body string
 	if m.help {
-		body = frame("Keyboard", "\n j / k       Move through accounts or quota windows\n Enter / Esc Show / hide account details\n /           Filter by alias, email, provider or workspace\n 1 / 2       Codex / Claude\n r           Read fresh quota (no inference request)\n s           Change default account, with confirmation\n n           New session on the selected account\n Esc         Clear filter / cancel\n q           Quit\n\n Quotas are model-specific. A full window does not mean\n every model is exhausted. Errors are never shown as 0%.\n\n ? / Esc     Close help", w, contentHeight, true)
+		body = frame("Keyboard", "\n j / k       Move through accounts or quota windows\n Enter / Esc Show / hide account details\n /           Filter by alias, email, provider or workspace\n 1 / 2 / 3   Codex / Claude / Muse\n r           Read fresh quota (no inference request)\n s           Change default account, with confirmation\n n           New session on the selected account\n Esc         Clear filter / cancel\n q           Quit\n\n Quotas are model-specific. A full window does not mean\n every model is exhausted. Errors are never shown as 0%.\n\n ? / Esc     Close help", w, contentHeight, true)
 	} else if m.confirmation != nil {
 		a := *m.confirmation
 		detail := fmt.Sprintf("Changes the shared default used by %d running Claude sessions. Their account may change mid-session.", m.data.Sessions)

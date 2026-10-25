@@ -214,7 +214,7 @@ func (m *Model) pageAccounts(direction int) {
 }
 
 func accountRowCount(a Account, width int) int {
-	if a.Provider == "codex" {
+	if a.Provider == "codex" || a.Provider == "muse" {
 		if a.Error != "" {
 			return 2
 		}
@@ -291,15 +291,24 @@ func accountLabel(a Account, width int) string {
 	return lipgloss.NewStyle().Bold(true).Foreground(amber).Render(safe(a.Name()))
 }
 
+// codexWeekly is the weekly window the overview shows for a Codex or Muse
+// row: the provider's own allowance, not a per-model one.
 func codexWeekly(a Account) *Window {
+	name := "Codex"
+	if a.Provider == "muse" {
+		name = "Muse"
+	}
 	for _, p := range pairs(a.Windows) {
-		if strings.EqualFold(p.name, "Codex") {
+		if strings.EqualFold(p.name, name) {
 			return p.weekly
 		}
 	}
 	return nil
 }
 func displayedWindows(a Account) []Window {
+	if a.Provider == "muse" {
+		return a.Windows
+	}
 	if a.Provider != "codex" {
 		return a.Windows
 	}

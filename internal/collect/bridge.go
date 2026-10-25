@@ -10,6 +10,7 @@ import (
 
 	"github.com/Maxteabag/hotseat/internal/claude"
 	"github.com/Maxteabag/hotseat/internal/codex"
+	"github.com/Maxteabag/hotseat/internal/muse"
 	"github.com/Maxteabag/hotseat/internal/quota"
 	"github.com/Maxteabag/hotseat/internal/tui"
 	"github.com/Maxteabag/hotseat/internal/work"
@@ -43,6 +44,8 @@ type Bridge struct {
 	Quota *quota.Cache
 	// Codex reads Codex accounts and balances; nil means codex.New(codex.DefaultHome()).
 	Codex CodexSource
+	// Muse reads the Muse Code account; nil means the real machine (&muse.Muse{}).
+	Muse MuseSource
 	// Profiles switches the default Codex profile; nil means
 	// codex.NewProfiles(codex.DefaultHome(), nil).
 	Profiles Switcher
@@ -93,6 +96,18 @@ func (b *Bridge) codex() CodexSource {
 		b.Codex = codex.New(codex.DefaultHome())
 	}
 	return b.Codex
+}
+
+// MuseSource is the part of *muse.Muse the bridge and the collector use.
+type MuseSource interface {
+	Overview(ctx context.Context) (*muse.Overview, error)
+}
+
+func (b *Bridge) muse() MuseSource {
+	if b.Muse == nil {
+		b.Muse = &muse.Muse{}
+	}
+	return b.Muse
 }
 
 func (b *Bridge) profiles() Switcher {
@@ -160,12 +175,16 @@ func (b *Bridge) Rows(ctx context.Context, refresh bool) (RowSnapshot, error) {
 	}
 
 	claudeRows := make([]Row, len(accounts))
-	var codexRows []Row
-	var codexErr string
+	var codexRows, museRows []Row
+	var codexErr, museErr string
 	group, gctx := errgroup.WithContext(ctx)
 	group.SetLimit(SnapshotWorkers)
 	group.Go(func() error {
 		codexRows, codexErr = b.codexRows(gctx, refresh)
+		return nil
+	})
+	group.Go(func() error {
+		museRows, museErr = b.museRows(gctx)
 		return nil
 	})
 	for i := range accounts {
@@ -183,9 +202,11 @@ func (b *Bridge) Rows(ctx context.Context, refresh bool) (RowSnapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return RowSnapshot{}, err
 	}
-	rows := append(claudeRows, codexRows...)
-	if codexErr != "" {
-		result.Errors = append(result.Errors, codexErr)
+	rows := append(append(claudeRows, codexRows...), museRows...)
+	for _, msg := range []string{codexErr, museErr} {
+		if msg != "" {
+			result.Errors = append(result.Errors, msg)
+		}
 	}
 	result.Accounts = GroupAccounts(rows)
 	return result, nil
@@ -310,6 +331,46 @@ func (b *Bridge) codexRows(ctx context.Context, refresh bool) ([]Row, string) {
 		rows = append(rows, row)
 	}
 	return rows, ""
+}
+
+// museRows is the Muse Code account, if one is signed in. Reading it runs
+// `muse usage`, which makes no model turn, so it is read on every snapshot.
+func (b *Bridge) museRows(ctx context.Context) ([]Row, string) {
+	overview, err := b.muse().Overview(ctx)
+	if err != nil {
+		return nil, "Muse discovery: " + err.Error()
+	}
+	if overview == nil || overview.Account == nil {
+		return nil, ""
+	}
+	return []Row{MuseRow(overview.Account, b.now())}, ""
+}
+
+// MuseRow is the row for one Muse Code account. Its windows are named
+// "Muse · 5-hour" and "Muse · weekly" so the TUI pairs them like Codex's.
+func MuseRow(account *muse.Account, now float64) Row {
+	plan := account.Tier
+	if plan == "" {
+		plan = "Muse Code"
+	}
+	row := Row{
+		Provider: "muse", Alias: "muse", Email: account.Email, Plan: plan,
+		Active: true, Saved: true, Windows: []tui.Window{}, Error: account.Error,
+	}
+	for _, w := range account.Windows {
+		window := tui.Window{Label: "Muse · " + w.Label}
+		if w.UsedPercent != nil {
+			window.Used = *w.UsedPercent / 100
+		}
+		if w.ResetsAt != nil {
+			window.Reset = *w.ResetsAt
+		}
+		row.Windows = append(row.Windows, window)
+	}
+	if row.Error == "" && len(row.Windows) > 0 {
+		row.CheckedAt = now
+	}
+	return row
 }
 
 // --- account actions ---------------------------------------------------------
