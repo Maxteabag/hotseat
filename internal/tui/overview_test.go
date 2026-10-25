@@ -159,3 +159,22 @@ func TestCodexOnlyShowsRegularWeeklyQuota(t *testing.T) {
 		t.Fatal("Claude columns changed")
 	}
 }
+
+func TestMuseTabShowsTheMuseAllowance(t *testing.T) {
+	m := Demo(context.Background())
+	m.data.Accounts = append(m.data.Accounts, Account{Provider: "muse", Alias: "muse", Email: "muse@example.com",
+		Plan: "Muse Code Power Usage", Active: true, Saved: true,
+		Windows: []Window{{Label: "Muse · 5-hour", Used: .5}, {Label: "Muse · weekly", Used: .25}}})
+	if v := ansi.Strip(m.View().Content); strings.Contains(v, "muse@example.com") {
+		t.Fatal("Muse row leaked into the Codex tab")
+	}
+	key(m, "3")
+	v := ansi.Strip(m.View().Content)
+	if !strings.Contains(v, "[3] Muse") || !strings.Contains(v, "75.0%") {
+		t.Fatalf("Muse tab missing the weekly allowance:\n%s", v)
+	}
+	a := m.data.Accounts[len(m.data.Accounts)-1]
+	if w := codexWeekly(a); w == nil || w.Used != .25 || len(displayedWindows(a)) != 2 {
+		t.Fatal("Muse weekly window not selected")
+	}
+}

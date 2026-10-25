@@ -13,6 +13,7 @@ import (
 
 	"github.com/Maxteabag/hotseat/internal/claude"
 	"github.com/Maxteabag/hotseat/internal/codex"
+	"github.com/Maxteabag/hotseat/internal/muse"
 	"github.com/Maxteabag/hotseat/internal/quota"
 	"github.com/Maxteabag/hotseat/internal/tui"
 	"github.com/Maxteabag/hotseat/internal/work"
@@ -99,6 +100,7 @@ func newBridge(t *testing.T, fetch func(context.Context, string) (quota.Summary,
 	b := &Bridge{
 		Backend:         backend,
 		Codex:           cx,
+		Muse:            fakeMuse{},
 		Quota:           &quota.Cache{Root: t.TempDir(), Fetch: fetch},
 		WorkService:     emptyWork(t),
 		RunningSessions: func() int { return 2 },
@@ -110,6 +112,54 @@ func newBridge(t *testing.T, fetch func(context.Context, string) (quota.Summary,
 }
 
 func floatPtr(v float64) *float64 { return &v }
+
+// fakeMuse is a Muse source; the zero value is a machine without Muse Code.
+type fakeMuse struct {
+	overview *muse.Overview
+	err      error
+}
+
+func (f fakeMuse) Overview(context.Context) (*muse.Overview, error) { return f.overview, f.err }
+
+func TestMuseRowReachesTUI(t *testing.T) {
+	b, _, _ := newBridge(t, func(context.Context, string) (quota.Summary, error) { return quota.Summary{}, nil })
+	used, reset := 25.0, 1792972800.0
+	b.Muse = fakeMuse{overview: &muse.Overview{Installed: true, LoggedIn: true, Account: &muse.Account{
+		Email: "user@example.com", Tier: "Muse Code Power Usage",
+		Windows: []muse.Window{{Label: "weekly", UsedPercent: &used, ResetsAt: &reset}}}}}
+	rows, err := b.Rows(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row *Row
+	for i := range rows.Accounts {
+		if rows.Accounts[i].Provider == "muse" {
+			row = &rows.Accounts[i]
+		}
+	}
+	if row == nil || row.Email != "user@example.com" || row.Plan != "Muse Code Power Usage" || !row.Active {
+		t.Fatalf("muse row = %+v", row)
+	}
+	if len(row.Windows) != 1 || row.Windows[0].Label != "Muse · weekly" || row.Windows[0].Used != 0.25 ||
+		row.Windows[0].Reset != reset || row.CheckedAt == 0 {
+		t.Fatalf("windows = %+v", row.Windows)
+	}
+	if row.CanSwitch || row.CanLaunch {
+		t.Fatal("a Muse row offers no switch or launch")
+	}
+}
+
+func TestMuseDiscoveryErrorIsReported(t *testing.T) {
+	b, _, _ := newBridge(t, func(context.Context, string) (quota.Summary, error) { return quota.Summary{}, nil })
+	b.Muse = fakeMuse{err: errors.New("auth.json: bad json")}
+	rows, err := b.Rows(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows.Errors) == 0 || !strings.Contains(strings.Join(rows.Errors, "\n"), "Muse discovery") {
+		t.Fatalf("errors = %v", rows.Errors)
+	}
+}
 
 // --- test_collect.py: _account_view -------------------------------------------
 

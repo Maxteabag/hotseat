@@ -20,6 +20,7 @@ import (
 	"github.com/Maxteabag/hotseat/internal/claude"
 	"github.com/Maxteabag/hotseat/internal/codex"
 	"github.com/Maxteabag/hotseat/internal/collect"
+	"github.com/Maxteabag/hotseat/internal/muse"
 	"github.com/Maxteabag/hotseat/internal/quota"
 	"github.com/Maxteabag/hotseat/internal/work"
 )
@@ -136,6 +137,7 @@ func newHarness(t *testing.T) *harness {
 			return nil, unexpected("balances")
 		},
 		codexAccount:   func(context.Context, codexAccountRequest) error { return unexpected("codexAccount") },
+		museOverview:   func(context.Context) (*muse.Overview, error) { return nil, nil },
 		clarpAvailable: func() bool { return true },
 		stopped:        func(context.Context, int) ([]work.StoppedItem, error) { return nil, nil },
 		continueItem: func(context.Context, work.StoppedItem) (work.Continuation, error) {
