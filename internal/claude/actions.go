@@ -544,6 +544,18 @@ func Switch(backend Backend, alias string, sessions int, acknowledged bool) (Swi
 		return SwitchResult{}, &ActionError{Msg: fmt.Sprintf("No saved profile named %s", pyRepr(alias))}
 	}
 
+	// One acquisition budget spans activation and each sequential profile lock.
+	// Root routing deliberately remains unchanged (custom-root bug: backlog 46).
+	deadline := time.Now().Add(activationWait)
+	activation, err := lockSwitchFile(store.ProfilesDir(), ".activation.lock", deadline)
+	if err != nil {
+		return SwitchResult{}, err
+	}
+	defer activation.release()
+	if err := activation.check(); err != nil {
+		return SwitchResult{}, err
+	}
+
 	live := filepath.Join(store.Root(), ".credentials.json")
 	identityFile := filepath.Join(target, "oauthAccount.json")
 
@@ -567,18 +579,46 @@ func Switch(backend Backend, alias string, sessions int, acknowledged bool) (Swi
 				sameAccount := candidate.Email != "" && candidate.Email == current.Email &&
 					candidate.OrgUUID == current.OrgUUID
 				if sameAccount {
-					payload, err := os.ReadFile(live)
+					// Refresh writers use only the canonical .lock, never activation.
+					outgoing, err := lockSwitchFile(filepath.Join(store.ProfilesDir(), candidate.Alias), ".lock", deadline)
 					if err != nil {
 						return SwitchResult{}, err
 					}
-					destination := filepath.Join(store.ProfilesDir(), candidate.Alias, "credentials.json")
-					if err := WritePrivate(destination, payload); err != nil {
+					err = func() error {
+						defer outgoing.release()
+						if err := activation.check(); err != nil {
+							return err
+						}
+						if err := outgoing.check(); err != nil {
+							return err
+						}
+						payload, err := os.ReadFile(live)
+						if err != nil {
+							return err
+						}
+						destination := filepath.Join(store.ProfilesDir(), candidate.Alias, "credentials.json")
+						return WritePrivate(destination, payload)
+					}()
+					if err != nil {
 						return SwitchResult{}, err
 					}
 					break
 				}
 			}
 		}
+	}
+
+	// Outgoing lock has been released; never nest two profile locks.
+	selected, err := lockSwitchFile(target, ".lock", deadline)
+	if err != nil {
+		return SwitchResult{}, err
+	}
+	defer selected.release()
+	if err := activation.check(); err != nil {
+		return SwitchResult{}, err
+	}
+	if err := selected.check(); err != nil {
+		return SwitchResult{}, err
 	}
 
 	payload, err := os.ReadFile(source)
