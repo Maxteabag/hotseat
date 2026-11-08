@@ -52,9 +52,13 @@ type UsageError struct {
 	// RetryAfter is the parsed Retry-After header in seconds; nil when the
 	// response carried none (Python: retry_after=None).
 	RetryAfter *float64
+	// Provenance is private metadata; Error() and legacy JSON are unchanged.
+	HTTPStatus int   `json:"-"`
+	Err        error `json:"-"`
 }
 
 func (e *UsageError) Error() string { return e.Message }
+func (e *UsageError) Unwrap() error { return e.Err }
 
 // Fetch returns the raw usage payload for an access token using Client.
 func Fetch(ctx context.Context, token string) (map[string]any, error) {
@@ -65,32 +69,33 @@ func Fetch(ctx context.Context, token string) (map[string]any, error) {
 func FetchWith(ctx context.Context, client *http.Client, token string) (map[string]any, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, UsageEndpoint, nil)
 	if err != nil {
-		return nil, &UsageError{Message: err.Error()}
+		return nil, &UsageError{Message: err.Error(), Err: err}
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("anthropic-beta", OAuthBeta)
 	request.Header.Set("Accept", "application/json")
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, &UsageError{Message: err.Error()}
+		return nil, &UsageError{Message: err.Error(), Err: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-			return nil, &UsageError{Message: "the account rejected this token"}
+			return nil, &UsageError{Message: "the account rejected this token", HTTPStatus: response.StatusCode}
 		}
 		return nil, &UsageError{
 			Message:    fmt.Sprintf("usage endpoint returned %d", response.StatusCode),
 			RetryAfter: retryAfter(response.Header.Get("Retry-After"), time.Now()),
+			HTTPStatus: response.StatusCode,
 		}
 	}
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, &UsageError{Message: err.Error()}
+		return nil, &UsageError{Message: err.Error(), Err: err}
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, &UsageError{Message: err.Error()}
+		return nil, &UsageError{Message: err.Error(), Err: err}
 	}
 	return payload, nil
 }

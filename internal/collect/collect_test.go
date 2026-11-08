@@ -165,7 +165,7 @@ func TestMuseDiscoveryErrorIsReported(t *testing.T) {
 
 func TestAccountViewReportsBothClocks(t *testing.T) {
 	now := time.Now()
-	view := accountView(testAccount(now), nil, nil, float64(now.UnixNano())/1e9)
+	view := accountView(testAccount(now), nil, nil, float64(now.UnixNano())/1e9, nil)
 	if view.AccessHoursLeft == nil || math.Abs(*view.AccessHoursLeft-4) > 0.05 {
 		t.Fatalf("access_hours_left = %v", view.AccessHoursLeft)
 	}
@@ -181,7 +181,7 @@ func TestAccountViewFlagsNearDeadline(t *testing.T) {
 	now := time.Now()
 	account := testAccount(now)
 	account.RefreshExpiresAt = ms(now.Add(3 * 24 * time.Hour))
-	if !accountView(account, nil, nil, 0).SigninDueSoon {
+	if !accountView(account, nil, nil, 0, nil).SigninDueSoon {
 		t.Fatal("three days out must be flagged")
 	}
 }
@@ -189,14 +189,14 @@ func TestAccountViewFlagsNearDeadline(t *testing.T) {
 func TestAccountViewMissingExpiryDoesNotFail(t *testing.T) {
 	account := testAccount(time.Now())
 	account.AccessExpiresAt, account.RefreshExpiresAt = nil, nil
-	view := accountView(account, nil, nil, 0)
+	view := accountView(account, nil, nil, 0, nil)
 	if view.SigninDaysLeft != nil || view.AccessHoursLeft != nil || view.SigninDueSoon {
 		t.Fatalf("view = %+v", view)
 	}
 }
 
 func TestAccountViewNeverIncludesTheToken(t *testing.T) {
-	raw, err := json.Marshal(accountView(testAccount(time.Now()), nil, nil, 0))
+	raw, err := json.Marshal(accountView(testAccount(time.Now()), nil, nil, 0, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

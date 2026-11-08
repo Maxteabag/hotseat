@@ -12,6 +12,8 @@ package collect
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -46,6 +48,9 @@ type AccountView struct {
 	// much the account is used.
 	SigninDaysLeft *float64 `json:"signin_days_left"`
 	SigninDueSoon  bool     `json:"signin_due_soon"`
+	// Only the account-row JSON grows; the broader PublicAccount stays unchanged.
+	OrgUUID   *string `json:"org_uuid"`
+	ErrorCode *string `json:"error_code"`
 }
 
 // Snapshot is what Collector.Build returns; field names match the Python dict.
@@ -70,11 +75,15 @@ type Snapshot struct {
 
 // AccountView builds the published view of one account from its probe outcome.
 // now is epoch seconds; 0 means the wall clock.
-func accountView(account claude.Account, usage *quota.Summary, probeErr *string, now float64) AccountView {
+func accountView(account claude.Account, usage *quota.Summary, probeErr *string, now float64, code *string) AccountView {
 	if now == 0 {
 		now = epochNow()
 	}
-	view := AccountView{PublicAccount: account.Public(), Error: probeErr, Usage: usage}
+	view := AccountView{PublicAccount: account.Public(), Error: probeErr, Usage: usage, ErrorCode: code}
+	if account.OrgUUID != "" {
+		org := account.OrgUUID
+		view.OrgUUID = &org
+	}
 	if access := account.AccessExpiresAt; access != nil && *access != 0 {
 		hours := (float64(*access)/1000 - now) / 3600
 		view.AccessHoursLeft = &hours
@@ -239,8 +248,8 @@ func (c *Collector) Build(ctx context.Context) (Snapshot, error) {
 					return err
 				}
 				account := accounts[i]
-				usage, probeErr := c.probe(gctx, &account)
-				views[i] = accountView(account, usage, probeErr, c.now())
+				usage, probeErr, code := c.probe(gctx, &account)
+				views[i] = accountView(account, usage, probeErr, c.now(), code)
 				return nil
 			})
 		}
@@ -340,35 +349,61 @@ func (c *Collector) extensions(ctx context.Context, views []AccountView) map[str
 // even when the account is rate limited, and reports per-model limits. The
 // header probe is kept only as a fallback for when that endpoint is
 // unavailable, and it cannot see per-model limits at all.
-func (c *Collector) probe(ctx context.Context, account *claude.Account) (*quota.Summary, *string) {
-	fail := func(message string) (*quota.Summary, *string) { return nil, &message }
+func (c *Collector) probe(ctx context.Context, account *claude.Account) (*quota.Summary, *string, *string) {
+	observed := *account
+	fail := func(message string, cause error) (*quota.Summary, *string, *string) {
+		code := accountErrorCode(cause)
+		if account.Alias != observed.Alias || account.Email != observed.Email ||
+			account.OrgUUID != observed.OrgUUID || account.Token != observed.Token {
+			code = "provider_error"
+		}
+		return nil, &message, &code
+	}
 	if account.Token == "" {
-		return fail("no stored token")
+		return fail("no stored token", nil)
 	}
 	if claude.Expired(*account, c.now(), 0) {
 		// Never send a dead token to the API. Bring the profile back through
 		// the CLI first; if that cannot be done, say why and stop there.
 		if err := c.refresh(c.backend(), account); err != nil {
-			return fail("Access token expired; refresh failed: " + err.Error())
+			return fail("Access token expired; refresh failed: "+err.Error(), err)
 		}
 	}
+	observed = *account
 	summary, first := c.usage(ctx, account.Token)
 	if first == nil {
-		return &summary, nil
+		return &summary, nil, nil
 	}
 	var usageErr *quota.UsageError
 	if !errors.As(first, &usageErr) {
-		return fail(first.Error())
+		return fail(first.Error(), first)
 	}
 	headers, err := c.headerProbe(ctx, account.Token)
 	if err != nil {
-		return fail(first.Error())
+		return fail(first.Error(), first)
 	}
 	fallback := quota.SummariseHeaders(headers)
 	fallback.Scoped = []quota.ScopedLimit{}
 	fallback.BlockedModels = []string{}
 	fallback.Degraded = "per-model limits unavailable"
-	return &fallback, nil
+	return &fallback, nil, nil
+}
+
+// Only authoritative credential-scoped rejection is repair evidence. Generic
+// 403 can be model/policy/challenge denial; its old Error() text is not evidence.
+// Generic RefreshError similarly remains unknown unless a typed cause survives.
+func accountErrorCode(err error) string {
+	var usage *quota.UsageError
+	var probe *quota.ProbeError
+	if errors.As(err, &usage) && usage != nil && usage.HTTPStatus == http.StatusUnauthorized ||
+		errors.As(err, &probe) && probe != nil && probe.HTTPStatus == http.StatusUnauthorized {
+		return "auth_error"
+	}
+	var timeout net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout() {
+		return "timeout"
+	}
+	return "provider_error"
 }
 
 // --- cache ------------------------------------------------------------------

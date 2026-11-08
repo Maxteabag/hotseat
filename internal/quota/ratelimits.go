@@ -32,10 +32,13 @@ var ProbeModels = []string{"claude-haiku-4-5-20251001", "claude-3-5-haiku-202410
 
 // ProbeError means the API could not be reached, or refused the token outright.
 type ProbeError struct {
-	Message string
+	Message    string
+	HTTPStatus int   `json:"-"`
+	Err        error `json:"-"`
 }
 
 func (e *ProbeError) Error() string { return e.Message }
+func (e *ProbeError) Unwrap() error { return e.Err }
 
 // Headers are response headers with lower-cased names; the last value wins for
 // a repeated header, as with Python's dict comprehension over headers.items().
@@ -63,12 +66,15 @@ func Probe(ctx context.Context, token string) (Headers, error) {
 // ProbeWith is Probe with an explicit HTTP client.
 func ProbeWith(ctx context.Context, client *http.Client, token string) (Headers, error) {
 	lastError := ""
+	var lastCause error
+	lastStatus := 0
 	for _, model := range ProbeModels {
 		name, _ := json.Marshal(model)
 		body := fmt.Sprintf(`{"model": %s, "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]}`, name)
 		request, err := http.NewRequestWithContext(ctx, http.MethodPost, APIURL, strings.NewReader(body))
 		if err != nil {
 			lastError = err.Error()
+			lastCause, lastStatus = err, 0
 			continue
 		}
 		request.Header.Set("Authorization", "Bearer "+token)
@@ -79,6 +85,7 @@ func ProbeWith(ctx context.Context, client *http.Client, token string) (Headers,
 		response, err := client.Do(request)
 		if err != nil {
 			lastError = err.Error()
+			lastCause, lastStatus = err, 0
 			continue
 		}
 		headers := lowerHeaders(response.Header)
@@ -89,9 +96,10 @@ func ProbeWith(ctx context.Context, client *http.Client, token string) (Headers,
 			return headers, nil
 		case response.StatusCode == http.StatusNotFound:
 			lastError = fmt.Sprintf("model %s unavailable", model)
+			lastCause, lastStatus = nil, response.StatusCode
 			continue
 		case response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden:
-			return nil, &ProbeError{Message: "the account rejected this token"}
+			return nil, &ProbeError{Message: "the account rejected this token", HTTPStatus: response.StatusCode}
 		default:
 			return headers, nil
 		}
@@ -99,7 +107,7 @@ func ProbeWith(ctx context.Context, client *http.Client, token string) (Headers,
 	if lastError == "" {
 		lastError = "no response from the API"
 	}
-	return nil, &ProbeError{Message: lastError}
+	return nil, &ProbeError{Message: lastError, HTTPStatus: lastStatus, Err: lastCause}
 }
 
 // fraction: utilisation arrives as a ready-made fraction, for example 0.36 for 36%.

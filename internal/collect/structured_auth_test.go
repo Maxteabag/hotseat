@@ -84,9 +84,10 @@ func TestStructuredAuthMetadataUsesNativeCauseAndPreservesFallbackPolicy(t *test
 			var original error
 			c.Usage = func(ctx context.Context, _ string) (quota.Summary, error) {
 				usageCalls++
-				original = nativeUsageFailure(ctx, tc.status, tc.cause)
 				if tc.misleading {
 					original = errors.New("401 invalid_grant expired login PRIVATE_SENTINEL")
+				} else {
+					original = nativeUsageFailure(ctx, tc.status, tc.cause)
 				}
 				if tc.wrapped {
 					original = fmt.Errorf("fixture wrapper: %w", original)
@@ -142,6 +143,7 @@ func TestStructuredAuthMetadataKeepsSameNameAndEmailOrganizationsDistinct(t *tes
 	first, second := testAccount(now), testAccount(now)
 	first.Alias, first.OrgUUID = "first", "fixture-org-A"
 	second.Alias, second.OrgUUID = "second", "fixture-org-B"
+	second.IsActive = false
 	c := newCollector(t, &fakeBackend{accounts: []claude.Account{first, second}})
 	c.Now = func() float64 { return float64(now.Unix()) }
 	c.Usage = func(context.Context, string) (quota.Summary, error) { return quota.Summary{Status: "allowed"}, nil }
@@ -179,5 +181,51 @@ func TestStructuredAuthMetadataDoesNotPromoteGenericRefreshFailureOrProbeOldToke
 	_, row := accountJSON(t, c)
 	if row["error_code"] != "provider_error" || row["usage"] != nil {
 		t.Fatal("generic refresh failure became authentication evidence or usable quota")
+	}
+}
+
+func TestStructuredAuthMetadataPreservesTypedRefreshCauseWithoutProbingOldToken(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	account := testAccount(now)
+	account.AccessExpiresAt = ms(now.Add(-time.Hour))
+	c := newCollector(t, &fakeBackend{accounts: []claude.Account{account}})
+	c.Now = func() float64 { return float64(now.Unix()) }
+	c.AutoRefresh = func(claude.Backend, *claude.Account) error {
+		// Real typed boundary over an in-process response, not an Error() string.
+		cause := nativeUsageFailure(context.Background(), 401, nil)
+		return &claude.RefreshError{Msg: "fixture refresh rejection", Err: fmt.Errorf("cause: %w", cause)}
+	}
+	c.Usage = func(context.Context, string) (quota.Summary, error) {
+		t.Fatal("superseded access token was probed")
+		return quota.Summary{}, nil
+	}
+	c.HeaderProbe = func(context.Context, string) (quota.Headers, error) {
+		t.Fatal("superseded access token was probed")
+		return nil, nil
+	}
+	_, row := accountJSON(t, c)
+	if row["error_code"] != "auth_error" || row["usage"] != nil ||
+		row["error"] != "Access token expired; refresh failed: fixture refresh rejection" {
+		t.Fatal("typed cause or legacy refresh outcome changed")
+	}
+}
+
+func TestStructuredAuthMetadataDoesNotAuthorizeAReboundRefreshIdentity(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	account := testAccount(now)
+	account.AccessExpiresAt = ms(now.Add(-time.Hour))
+	c := newCollector(t, &fakeBackend{accounts: []claude.Account{account}})
+	c.Now = func() float64 { return float64(now.Unix()) }
+	c.AutoRefresh = func(_ claude.Backend, account *claude.Account) error {
+		account.OrgUUID = "rebound-org"
+		return &claude.RefreshError{Msg: "fixture rejection", Err: nativeUsageFailure(context.Background(), 401, nil)}
+	}
+	c.Usage = func(context.Context, string) (quota.Summary, error) {
+		t.Fatal("unexpected probe")
+		return quota.Summary{}, nil
+	}
+	_, row := accountJSON(t, c)
+	if row["error_code"] != "provider_error" || row["usage"] != nil {
+		t.Fatal("a different identity inherited authentication evidence")
 	}
 }
