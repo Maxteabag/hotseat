@@ -1,0 +1,46 @@
+name: AUTH934 fixed nine synthetic emitter tests
+on:
+  push:
+    branches: [ci/auth934-go-48425e5-934e0002]
+permissions:
+  contents: read
+jobs:
+  emitter-nine:
+    if: github.repository == 'Maxteabag/hotseat' && github.event_name == 'push' && github.ref == 'refs/heads/ci/auth934-go-48425e5-934e0002'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Immutable controller
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        timeout-minutes: 2
+        with:
+          ref: ${{ github.sha }}
+          path: controller
+          persist-credentials: false
+      - name: Exact reviewed source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        timeout-minutes: 2
+        with:
+          ref: 48425e53b37a1df0749e16124cd26672f7d15c76
+          path: source
+          persist-credentials: false
+      - name: Locked Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        timeout-minutes: 3
+        with:
+          go-version-file: source/go.mod
+          cache: false
+      - name: Bounded synthetic phases
+        timeout-minutes: 9
+        shell: bash
+        run: python3 controller/tools/auth934/emitter_nine.py
+      - name: Raw receipts and hash index
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        timeout-minutes: 1
+        with:
+          name: auth934-go-nine-${{ github.sha }}-${{ github.run_attempt }}
+          path: auth934-go-evidence/
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: false
