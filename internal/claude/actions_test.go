@@ -858,6 +858,42 @@ func TestDetachedSpawnRunsAndDetaches(t *testing.T) {
 	}
 }
 
+// profilesUnreadableAfterActiveBackend moves only the private test fault to
+// the snapshot boundary. The real activation lock/check and backend operations
+// run unchanged; no fabricated error or guard result is returned.
+type profilesUnreadableAfterActiveBackend struct {
+	*LinuxBackend
+	activeCalls        int
+	profilesCalls      int
+	activationObserved bool
+	current            *Account
+	activeErr          error
+	permissionErr      error
+	listingErr         error
+}
+
+func (b *profilesUnreadableAfterActiveBackend) active() (*Account, error) {
+	b.activeCalls++
+	info, lockErr := os.Stat(filepath.Join(b.ProfilesDir(), ".activation.lock"))
+	b.activationObserved = lockErr == nil && info.Mode().IsRegular() && info.Mode().Perm() == 0o600
+	b.current, b.activeErr = b.LinuxBackend.active()
+	if b.activeErr != nil || b.current == nil {
+		return b.current, b.activeErr
+	}
+	b.permissionErr = os.Chmod(b.ProfilesDir(), 0o100) // traversable, not listable
+	if b.permissionErr != nil {
+		return nil, b.permissionErr
+	}
+	return b.current, nil
+}
+
+func (b *profilesUnreadableAfterActiveBackend) profiles() ([]Account, error) {
+	b.profilesCalls++
+	accounts, err := b.LinuxBackend.profiles() // real os.ReadDir, not an error stub
+	b.listingErr = err
+	return accounts, err
+}
+
 func TestSwitchRefusesWhenProfilesCannotBeListed(t *testing.T) {
 	// Listing the profiles is how the outgoing live token finds its way back
 	// into its own profile. If that listing fails, the switch must stop before
@@ -867,14 +903,30 @@ func TestSwitchRefusesWhenProfilesCannotBeListed(t *testing.T) {
 	}
 	f := newSwitchFixture(t)
 	profiles := filepath.Join(f.root, "profiles")
-	if err := os.Chmod(profiles, 0o100); err != nil { // traversable, not listable
-		t.Fatal(err)
-	}
 	t.Cleanup(func() { _ = os.Chmod(profiles, 0o700) })
-	_, err := Switch(f.backend, "other", 1, true)
+	// Admit through the real activation guard before making the original
+	// backend's profile enumeration fail. An unreadable root at entry now
+	// intentionally fails earlier with invalid_lock (AUTH934-EARLY-ROOT-REFUSAL).
+	backend := &profilesUnreadableAfterActiveBackend{LinuxBackend: f.backend}
+	_, err := Switch(backend, "other", 1, true)
+	if backend.activeCalls != 1 || backend.profilesCalls != 1 || !backend.activationObserved {
+		t.Fatalf("real guarded snapshot/list path not reached: active=%d profiles=%d activation=%v",
+			backend.activeCalls, backend.profilesCalls, backend.activationObserved)
+	}
+	if backend.activeErr != nil || backend.permissionErr != nil || backend.current == nil || backend.current.Token != "LIVE" {
+		t.Fatalf("original active read or permission fixture failed: active=%v chmod=%v current=%v",
+			backend.activeErr, backend.permissionErr, backend.current != nil)
+	}
 	var be *BackendError
 	if !errors.As(err, &be) {
 		t.Fatalf("expected a BackendError, got %v", err)
+	}
+	if err != backend.listingErr || !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("original ReadDir permission error was not propagated unchanged: %v", err)
+	}
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) || pathErr.Path != profiles {
+		t.Fatalf("permission failure did not come from the actual profiles directory: %v", err)
 	}
 	live := filepath.Join(f.root, ".credentials.json")
 	if f.token(live) != "LIVE" {
