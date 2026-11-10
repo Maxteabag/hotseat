@@ -936,3 +936,61 @@ func TestSwitchRefusesWhenProfilesCannotBeListed(t *testing.T) {
 		t.Fatalf("work profile token = %q", got)
 	}
 }
+
+func TestSwitchRefusesUnreadableActivationRootBeforeSnapshot(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs POSIX permissions and a non-root user")
+	}
+	f := newSwitchFixture(t)
+	profiles := filepath.Join(f.root, "profiles")
+	t.Cleanup(func() { _ = os.Chmod(profiles, 0o700) })
+	credentials := []string{
+		filepath.Join(f.root, ".credentials.json"),
+		filepath.Join(profiles, "work", "credentials.json"),
+		filepath.Join(profiles, "other", "credentials.json"),
+	}
+	before := make(map[string][]byte, len(credentials))
+	for _, name := range credentials {
+		payload, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[name] = payload
+	}
+	// The target exists and the only fault is the real private root permission
+	// at admission. Reuse the original-operation forwarding backend to prove
+	// Switch refuses before either snapshot method can run.
+	backend := &profilesUnreadableAfterActiveBackend{LinuxBackend: f.backend}
+	if err := os.Chmod(profiles, 0o100); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Switch(backend, "other", 1, true)
+	// Restore only after the real call, for byte checks and reliable cleanup.
+	if restoreErr := os.Chmod(profiles, 0o700); restoreErr != nil {
+		t.Fatal(restoreErr)
+	}
+	var lockErr *ActivationLockError
+	if !errors.As(err, &lockErr) || lockErr.Code != "invalid_lock" {
+		t.Fatalf("expected exact invalid_lock admission refusal, got %v", err)
+	}
+	if err.Error() != "Account activation refused: invalid_lock" {
+		t.Fatalf("activation refusal text = %q", err.Error())
+	}
+	var backendErr *BackendError
+	if errors.As(err, &backendErr) {
+		t.Fatalf("unreadable activation root reached backend listing: %v", err)
+	}
+	if backend.activeCalls != 0 || backend.profilesCalls != 0 {
+		t.Fatalf("snapshot methods ran before admission: active=%d profiles=%d",
+			backend.activeCalls, backend.profilesCalls)
+	}
+	for _, name := range credentials {
+		after, readErr := os.ReadFile(name)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !reflect.DeepEqual(after, before[name]) {
+			t.Fatalf("credential bytes changed after refusal: %s", name)
+		}
+	}
+}
