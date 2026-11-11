@@ -278,15 +278,15 @@ func (c *Collector) codexOverview(ctx context.Context) *codex.Overview {
 	return overview
 }
 
-// quotas is the readiness view of the probed accounts: alias plus the part of
-// the usage summary readiness looks at, nil when the probe failed.
-func quotas(views []AccountView) ([]work.AccountQuota, string) {
+// AccountQuotas is the readiness view of the probed accounts: alias plus the
+// part of the usage summary readiness looks at, nil when the probe failed.
+func AccountQuotas(views []AccountView) ([]work.AccountQuota, string) {
 	accounts := make([]work.AccountQuota, 0, len(views))
 	defaultAlias := ""
 	for _, view := range views {
 		item := work.AccountQuota{Alias: view.Alias}
 		if view.Usage != nil {
-			item.Usage = &work.Quota{Limited: view.Usage.Limited, BlockedModels: view.Usage.BlockedModels}
+			item.Usage = quotaForReadiness(view.Usage)
 		}
 		accounts = append(accounts, item)
 		if view.IsActive && defaultAlias == "" {
@@ -294,6 +294,41 @@ func quotas(views []AccountView) ([]work.AccountQuota, string) {
 		}
 	}
 	return accounts, defaultAlias
+}
+
+func quotaForReadiness(u *quota.Summary) *work.Quota {
+	overageOK := u.ExtraUsageEnabled || u.OverageStatus == "allowed" || u.OverageStatus == "allowed_warning"
+	unifiedOK := u.Status == "allowed" || u.Status == "allowed_warning"
+	limited := u.Limited ||
+		(u.Status == "rejected" && !overageOK) ||
+		(u.Status7d == "rejected" && !overageOK && !unifiedOK) ||
+		(u.Status5h == "rejected" && !overageOK && !unifiedOK) ||
+		(u.Used7d != nil && *u.Used7d >= 1.0 && !overageOK) ||
+		(u.Used5h != nil && *u.Used5h >= 1.0 && !overageOK && !unifiedOK)
+
+	blocked := make([]string, 0, len(u.BlockedModels))
+	seen := make(map[string]bool, len(u.BlockedModels))
+	for _, m := range u.BlockedModels {
+		if m != "" && !seen[m] {
+			seen[m] = true
+			blocked = append(blocked, m)
+		}
+	}
+	for _, s := range u.Scoped {
+		if (s.Exhausted || s.Used >= 1.0) && s.Model != "" && !seen[s.Model] {
+			seen[s.Model] = true
+			blocked = append(blocked, s.Model)
+		}
+	}
+	return &work.Quota{
+		Limited:                limited,
+		BlockedModels:          blocked,
+		ModelLimitsUnavailable: u.Degraded != "",
+	}
+}
+
+func quotas(views []AccountView) ([]work.AccountQuota, string) {
+	return AccountQuotas(views)
 }
 
 // stopped is work a usage limit stopped, with whether it can be continued now.

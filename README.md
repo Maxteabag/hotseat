@@ -236,9 +236,11 @@ A native session qualifies when the last entry in its transcript is the limit
 error, so a limit that was worked through counts as history. Quota is checked
 before anything is continued: an account that is still rate limited is a hard
 block, while a spent limit for one model family is a warning, since the resumed
-work may not use that family. Each native Claude session is listed with a
-ready-to-paste `claude --resume` command and its working directory; the TUI's
-Work screen covers Codex sessions as well.
+work may not use that family. If the usage read cannot see per-model limits,
+Hotseat reports model-specific readiness as unknown; it will not claim the
+account can serve Fable or another scoped model. Each native Claude session is
+listed with a ready-to-paste `claude --resume` command and its working
+directory; the TUI's Work screen covers Codex sessions as well.
 
 ## Optional Clarp integration
 

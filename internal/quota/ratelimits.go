@@ -153,17 +153,37 @@ func headerOr(headers Headers, name, fallback string) string {
 	return fallback
 }
 
+func statusAllowed(status string) bool {
+	return status == "allowed" || status == "allowed_warning"
+}
+
 // SummariseHeaders reduces the raw headers to the few numbers the dashboard renders.
 // Utilization is already a fraction and is not rescaled.
 //
 // An account can be rejected on its 5-hour window yet still serve requests from
-// purchased extra usage, so availability follows the status fields rather than
-// being inferred from utilisation.
+// purchased extra usage, so availability follows the unified and overage status
+// headers rather than letting an allowed 5-hour window mask a rejected weekly one.
 func SummariseHeaders(headers Headers) Summary {
 	unified := headerOr(headers, "anthropic-ratelimit-unified-status", "unknown")
 	status5h := headerOr(headers, "anthropic-ratelimit-unified-5h-status", "unknown")
 	status7d := headerOr(headers, "anthropic-ratelimit-unified-7d-status", "unknown")
-	available := unified == "allowed" || status5h == "allowed"
+	overage := headers["anthropic-ratelimit-unified-overage-status"]
+	used5h := fraction(headers, "anthropic-ratelimit-unified-5h-utilization")
+	used7d := fraction(headers, "anthropic-ratelimit-unified-7d-utilization")
+
+	var available bool
+	switch {
+	case statusAllowed(overage):
+		available = true
+	case statusAllowed(unified):
+		available = true
+	case unified == "rejected" || status5h == "rejected" || status7d == "rejected":
+		available = false
+	default:
+		available = (statusAllowed(status5h) || statusAllowed(status7d)) &&
+			(used5h == nil || *used5h < 1.0) &&
+			(used7d == nil || *used7d < 1.0)
+	}
 	return Summary{
 		Source:    SourceProbe,
 		Status:    unified,
@@ -171,12 +191,12 @@ func SummariseHeaders(headers Headers) Summary {
 		Status7d:  status7d,
 		Available: available,
 		Limited:   !available,
-		Used5h:    fraction(headers, "anthropic-ratelimit-unified-5h-utilization"),
+		Used5h:    used5h,
 		Reset5h: epochHeader(headers, "anthropic-ratelimit-unified-5h-reset",
 			"anthropic-ratelimit-unified-reset"),
-		Used7d:        fraction(headers, "anthropic-ratelimit-unified-7d-utilization"),
+		Used7d:        used7d,
 		Reset7d:       epochHeader(headers, "anthropic-ratelimit-unified-7d-reset"),
-		OverageStatus: headers["anthropic-ratelimit-unified-overage-status"],
+		OverageStatus: overage,
 		OverageReason: headers["anthropic-ratelimit-unified-overage-disabled-reason"],
 		// Which window is currently the binding constraint, straight from the API.
 		Binding:    headers["anthropic-ratelimit-unified-representative-claim"],

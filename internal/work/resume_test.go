@@ -228,24 +228,72 @@ func TestPriorityOrdersBlockedWorkFirstAndIdlePausesLast(t *testing.T) {
 }
 
 func TestFamilyAndServableBy(t *testing.T) {
-	if Family("claude-fable-5-1") != "fable" || Family("Claude-Opus-4") != "opus" || Family("gpt-5") != "" {
+	if Family("claude-fable-5-1") != "fable" || Family("claude-fable-5-2") != "fable" || Family("Fable") != "fable" || Family("Claude-Opus-4") != "opus" || Family("gpt-5") != "" {
 		t.Fatal("family detection")
 	}
 	accounts := []AccountQuota{
 		{Alias: "a", Usage: &Quota{}},
 		{Alias: "b", Usage: &Quota{Limited: true}},
 		{Alias: "c", Usage: &Quota{BlockedModels: []string{"claude-opus-4"}}},
+		{Alias: "f", Usage: &Quota{BlockedModels: []string{"Fable"}}},
+		{Alias: "deg", Usage: &Quota{ModelLimitsUnavailable: true}},
 		{Alias: "", Usage: &Quota{}},
 		{Alias: "d"},
 	}
-	if got := ServableBy("claude-opus-4-1", accounts); strings.Join(got, ",") != "a" {
+	if got := ServableBy("claude-opus-4-1", accounts); strings.Join(got, ",") != "a,f" {
 		t.Fatalf("opus servable by %v", got)
 	}
-	if got := ServableBy("claude-sonnet-4", accounts); strings.Join(got, ",") != "a,c" {
+	if got := ServableBy("claude-fable-5-2", accounts); strings.Join(got, ",") != "a,c" {
+		t.Fatalf("fable servable by %v", got)
+	}
+	if got := ServableBy("claude-sonnet-4", accounts); strings.Join(got, ",") != "a,c,f" {
 		t.Fatalf("sonnet servable by %v", got)
 	}
-	if got := ServableBy("", accounts); strings.Join(got, ",") != "a,c" {
+	if got := ServableBy("", accounts); strings.Join(got, ",") != "a,c,f,deg" {
 		t.Fatalf("unknown model servable by %v", got)
+	}
+}
+
+func TestReadinessParkedModelRespectsWeeklyExhaustionBlockedDisplayNamesAndDegradedProbes(t *testing.T) {
+	fable := StoppedItem{Cause: "waiting_for_account", Model: "claude-fable-5-2", Backend: "claude"}
+
+	// Exact Elitebook failure shape: ai5 weekly-rejected (Limited: true) and
+	// ai9 with BlockedModels: ["Fable"] must report a hard starvation block,
+	// even if another saved profile has unreadable/missing usage (Usage == nil).
+	blockedAccounts := []AccountQuota{
+		{Alias: "ai5", Usage: &Quota{Limited: true}},
+		{Alias: "ai9", Usage: &Quota{BlockedModels: []string{"Fable"}}},
+		{Alias: "stale"},
+	}
+	got := ReadinessOf(fable, blockedAccounts, "ai9")
+	if got.Ready || deref(got.Hard) != "no account can serve claude-fable-5-2" || deref(got.Warning) != "" {
+		t.Fatalf("blocked fable readiness = %+v (hard=%q warning=%q)", got, deref(got.Hard), deref(got.Warning))
+	}
+	starving := StarvingModels([]StoppedItem{
+		{Name: "koko-8255", Cause: "waiting_for_account", Model: "claude-fable-5-2"},
+		{Name: "review-252-6338", Cause: "waiting_for_account", Model: "claude-fable-5-2"},
+	}, blockedAccounts)
+	if strings.Join(starving["claude-fable-5-2"], ",") != "koko-8255,review-252-6338" {
+		t.Fatalf("starving = %v", starving)
+	}
+
+	// Header-probe fallback (ModelLimitsUnavailable: true) cannot verify Fable
+	// headroom, so a parked Fable agent must not be marked ready, while an
+	// item without a specific model requirement can still use the general window.
+	degradedAccounts := []AccountQuota{
+		{Alias: "ai5", Usage: &Quota{Limited: true}},
+		{Alias: "ai9", Usage: &Quota{ModelLimitsUnavailable: true}},
+	}
+	got = ReadinessOf(fable, degradedAccounts, "ai9")
+	if got.Ready || deref(got.Hard) != "" || deref(got.Warning) != "cannot verify claude-fable-5-2 quota; per-model limits are unavailable" {
+		t.Fatalf("degraded fable readiness = %+v (hard=%q warning=%q)", got, deref(got.Hard), deref(got.Warning))
+	}
+	if s := StarvingModels([]StoppedItem{fable}, degradedAccounts); len(s) != 0 {
+		t.Fatalf("unverified model quota must warn rather than claim proven starvation: %v", s)
+	}
+	unpinned := ReadinessOf(StoppedItem{Cause: "waiting_for_account", Backend: "claude"}, degradedAccounts, "ai9")
+	if !unpinned.Ready || deref(unpinned.Warning) != "parked; ai9 could serve it" {
+		t.Fatalf("unpinned readiness = %+v (warning=%q)", unpinned, deref(unpinned.Warning))
 	}
 }
 

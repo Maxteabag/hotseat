@@ -457,15 +457,8 @@ func nullable(s string) *string {
 
 // accountQuotas is the readiness view of a snapshot's accounts.
 func accountQuotas(accounts []collect.AccountView) []work.AccountQuota {
-	out := make([]work.AccountQuota, 0, len(accounts))
-	for _, view := range accounts {
-		item := work.AccountQuota{Alias: view.Alias}
-		if view.Usage != nil {
-			item.Usage = &work.Quota{Limited: view.Usage.Limited, BlockedModels: view.Usage.BlockedModels}
-		}
-		out = append(out, item)
-	}
-	return out
+	quotas, _ := collect.AccountQuotas(accounts)
+	return quotas
 }
 
 // confirm asks a yes/no question on stdin. Only reached when stdin is a terminal.

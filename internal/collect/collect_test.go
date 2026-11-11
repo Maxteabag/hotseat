@@ -278,6 +278,45 @@ func TestBuildFallsBackToHeaderProbe(t *testing.T) {
 			t.Fatalf("missing %s in %s", key, raw)
 		}
 	}
+	quotas, def := AccountQuotas(snap.Accounts)
+	if def != "work" || len(quotas) != 1 || quotas[0].Usage == nil || !quotas[0].Usage.ModelLimitsUnavailable {
+		t.Fatalf("degraded header-probe quota must flag ModelLimitsUnavailable: %+v", quotas)
+	}
+}
+
+func TestAccountQuotasMarksWeeklyExhaustedAndScopedExhaustedModels(t *testing.T) {
+	zero := 0.0
+	full := 1.0
+	partial := 0.63
+	views := []AccountView{
+		{
+			PublicAccount: claude.PublicAccount{Alias: "ai5"},
+			Usage: &quota.Summary{
+				Status: "rejected", Status5h: "allowed", Status7d: "rejected",
+				Used5h: &zero, Used7d: &full, Available: false, Limited: false,
+			},
+		},
+		{
+			PublicAccount: claude.PublicAccount{Alias: "ai9", IsActive: true},
+			Usage: &quota.Summary{
+				Status: "allowed", Available: true, Used5h: &zero, Used7d: &partial,
+				Scoped: []quota.ScopedLimit{{Model: "Fable", Used: full, Exhausted: true}},
+			},
+		},
+	}
+	quotas, def := AccountQuotas(views)
+	if def != "ai9" || len(quotas) != 2 {
+		t.Fatalf("def=%q quotas=%+v", def, quotas)
+	}
+	if !quotas[0].Usage.Limited {
+		t.Fatalf("weekly-rejected ai5 must be Limited: %+v", quotas[0].Usage)
+	}
+	if quotas[1].Usage.Limited || strings.Join(quotas[1].Usage.BlockedModels, ",") != "Fable" {
+		t.Fatalf("scoped-exhausted ai9 must carry Fable in BlockedModels: %+v", quotas[1].Usage)
+	}
+	if servable := work.ServableBy("claude-fable-5-2", quotas); len(servable) != 0 {
+		t.Fatalf("claude-fable-5-2 must not be servable by ai5 or ai9, got %v", servable)
+	}
 }
 
 func TestBuildReportsTheFirstErrorWhenBothProbesFail(t *testing.T) {

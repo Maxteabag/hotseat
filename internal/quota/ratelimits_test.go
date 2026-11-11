@@ -64,12 +64,35 @@ func TestSummariseHeaders(t *testing.T) {
 				t.Fatal("over-quota must not be clamped to 100%")
 			}
 		}},
-		// A rejected 5-hour window can still serve requests from purchased usage.
+		// A rejected 5-hour window can still serve requests from purchased usage
+		// when overage (extra usage) or the unified decision allows it.
 		{"extra usage keeps an account usable", withHeaders(allowed, Headers{
-			"anthropic-ratelimit-unified-status": "rejected",
+			"anthropic-ratelimit-unified-status":         "rejected",
+			"anthropic-ratelimit-unified-5h-status":      "rejected",
+			"anthropic-ratelimit-unified-overage-status": "allowed",
 		}), func(t *testing.T, out Summary) {
-			if !out.Available {
-				t.Fatal("expected available")
+			if !out.Available || out.Limited {
+				t.Fatalf("available=%v limited=%v", out.Available, out.Limited)
+			}
+		}},
+		{"seven day rejection marks the account limited even when five hour is allowed", withHeaders(allowed, Headers{
+			"anthropic-ratelimit-unified-status":         "rejected",
+			"anthropic-ratelimit-unified-5h-status":      "allowed",
+			"anthropic-ratelimit-unified-5h-utilization": "0",
+			"anthropic-ratelimit-unified-7d-status":      "rejected",
+			"anthropic-ratelimit-unified-7d-utilization": "1.0",
+		}), func(t *testing.T, out Summary) {
+			if out.Available || !out.Limited {
+				t.Fatalf("expected unavailable and limited, got available=%v limited=%v", out.Available, out.Limited)
+			}
+		}},
+		{"allowed_warning counts as available", withHeaders(allowed, Headers{
+			"anthropic-ratelimit-unified-status":    "allowed_warning",
+			"anthropic-ratelimit-unified-5h-status": "allowed_warning",
+			"anthropic-ratelimit-unified-7d-status": "allowed_warning",
+		}), func(t *testing.T, out Summary) {
+			if !out.Available || out.Limited {
+				t.Fatalf("available=%v limited=%v", out.Available, out.Limited)
 			}
 		}},
 		{"missing headers degrade to unknown", Headers{}, func(t *testing.T, out Summary) {

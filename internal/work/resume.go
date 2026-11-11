@@ -61,8 +61,9 @@ type Readiness struct {
 
 // Quota is the part of an account's usage summary readiness looks at.
 type Quota struct {
-	Limited       bool
-	BlockedModels []string
+	Limited                bool
+	BlockedModels          []string
+	ModelLimitsUnavailable bool
 }
 
 // AccountQuota is one saved account as readiness sees it: its alias and its
@@ -374,32 +375,55 @@ func Family(model string) string {
 // limit for that model's family. Per-model limits are the point: an account can
 // be healthy overall and still unable to serve one family.
 func ServableBy(model string, accounts []AccountQuota) []string {
-	family := Family(model)
+	able, _ := servability(model, accounts)
+	return able
+}
+
+// servability keeps missing per-model quota evidence separate from an exhausted
+// model. A fallback header probe can report general windows while explicitly
+// saying per-model limits are unavailable; that must never qualify an account
+// for model-specific work such as Fable, while a broken/unreadable profile
+// (Usage == nil) is simply unusable and does not mask starvation across the
+// readable accounts.
+func servability(model string, accounts []AccountQuota) ([]string, bool) {
 	var able []string
+	unknown := false
 	for _, account := range accounts {
 		usage := account.Usage
 		if usage == nil || usage.Limited {
 			continue
 		}
-		blocked := false
-		for _, m := range usage.BlockedModels {
-			name := Family(m)
-			if name == "" {
-				name = strings.ToLower(m)
-			}
-			if family != "" && name == family {
-				blocked = true
-				break
-			}
+		if model != "" && usage.ModelLimitsUnavailable {
+			unknown = true
+			continue
 		}
-		if blocked {
+		if modelBlocked(model, usage.BlockedModels) {
 			continue
 		}
 		if account.Alias != "" {
 			able = append(able, account.Alias)
 		}
 	}
-	return able
+	return able, unknown
+}
+
+func modelBlocked(model string, blocked []string) bool {
+	if model == "" {
+		return false
+	}
+	family := Family(model)
+	lowered := strings.ToLower(strings.TrimSpace(model))
+	for _, m := range blocked {
+		name := Family(m)
+		if family != "" && name == family {
+			return true
+		}
+		candidate := strings.ToLower(strings.TrimSpace(m))
+		if candidate != "" && (candidate == lowered || strings.Contains(lowered, candidate)) {
+			return true
+		}
+	}
+	return false
 }
 
 // StarvingModels maps models no account can serve to the agents waiting on them.
@@ -414,7 +438,7 @@ func StarvingModels(items []StoppedItem, accounts []AccountQuota) map[string][]s
 		if item.Cause != "waiting_for_account" {
 			continue
 		}
-		if len(ServableBy(item.Model, accounts)) > 0 {
+		if able, unknown := servability(item.Model, accounts); len(able) > 0 || unknown {
 			continue
 		}
 		model := item.Model
@@ -440,9 +464,16 @@ func StarvingModels(items []StoppedItem, accounts []AccountQuota) map[string][]s
 // because the resumed work may not use that family at all.
 func ReadinessOf(item StoppedItem, accounts []AccountQuota, defaultAlias string) Readiness {
 	if item.Cause == "waiting_for_account" {
-		able := ServableBy(item.Model, accounts)
+		able, unknown := servability(item.Model, accounts)
 		if len(able) > 0 {
 			return Readiness{Ready: true, Warning: ptr(fmt.Sprintf("parked; %s could serve it", strings.Join(able[:min(2, len(able))], ", ")))}
+		}
+		if unknown {
+			model := item.Model
+			if model == "" {
+				model = "model-specific"
+			}
+			return Readiness{Warning: ptr("cannot verify " + model + " quota; per-model limits are unavailable")}
 		}
 		model := item.Model
 		if model == "" {

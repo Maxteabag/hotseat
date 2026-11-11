@@ -853,6 +853,93 @@ func TestResumeWithoutClarpIsTheCoreCommand(t *testing.T) {
 	}
 }
 
+func TestResumeParkedFableAgentsRejectWeeklyExhaustedAndBlockedOrDegradedAccounts(t *testing.T) {
+	stoppedFable := []work.StoppedItem{
+		{Kind: "clarp", ID: "koko-8255", Name: "koko", Backend: "claude", Cause: "waiting_for_account", Model: "claude-fable-5-2"},
+		{Kind: "clarp", ID: "review-252-6338", Name: "review-252", Backend: "claude", Cause: "waiting_for_account", Model: "claude-fable-5-2"},
+	}
+
+	t.Run("usage endpoint reports ai5 weekly rejected and ai9 Fable blocked", func(t *testing.T) {
+		h := newHarness(t)
+		h.build = func(context.Context) (collect.Snapshot, error) {
+			return collect.Snapshot{
+				Accounts: []collect.AccountView{
+					{
+						PublicAccount: claude.PublicAccount{Alias: "ai5"},
+						Usage: &quota.Summary{
+							Source: quota.SourceUsage, Status: "rejected", Available: false, Limited: true,
+							Used5h: ptrOf(0.0), Used7d: ptrOf(1.0), BlockedModels: []string{},
+						},
+					},
+					{
+						PublicAccount: claude.PublicAccount{Alias: "ai9", IsActive: true},
+						Usage: &quota.Summary{
+							Source: quota.SourceUsage, Status: "allowed", Available: true, Limited: false,
+							Used5h: ptrOf(0.0), Used7d: ptrOf(0.63), BlockedModels: []string{"Fable"},
+						},
+					},
+				},
+			}, nil
+		}
+		h.stopped = func(context.Context, int) ([]work.StoppedItem, error) { return stoppedFable, nil }
+
+		if code := h.run("resume", "--json"); code != 0 {
+			t.Fatalf("exit %d: %s", code, h.err.String())
+		}
+		items := h.json(t)["items"].([]any)
+		if len(items) != 2 {
+			t.Fatalf("items = %v", items)
+		}
+		for _, raw := range items {
+			item := raw.(map[string]any)
+			readiness := item["readiness"].(map[string]any)
+			if readiness["ready"] != false || readiness["hard"] != "no account can serve claude-fable-5-2" || readiness["warning"] != nil {
+				t.Errorf("parked fable item falsely marked servable: %v", item)
+			}
+		}
+	})
+
+	t.Run("header probe fallback degrades ai9 per-model limits while ai5 is 7d rejected", func(t *testing.T) {
+		h := newHarness(t)
+		ai5Headers := quota.SummariseHeaders(quota.Headers{
+			"anthropic-ratelimit-unified-status":         "rejected",
+			"anthropic-ratelimit-unified-5h-status":      "allowed",
+			"anthropic-ratelimit-unified-5h-utilization": "0",
+			"anthropic-ratelimit-unified-7d-status":      "rejected",
+			"anthropic-ratelimit-unified-7d-utilization": "1.0",
+		})
+		ai9Headers := quota.SummariseHeaders(quota.Headers{
+			"anthropic-ratelimit-unified-status":         "allowed",
+			"anthropic-ratelimit-unified-5h-status":      "allowed",
+			"anthropic-ratelimit-unified-5h-utilization": "0",
+			"anthropic-ratelimit-unified-7d-status":      "allowed",
+			"anthropic-ratelimit-unified-7d-utilization": "0.63",
+		})
+		ai9Headers.Degraded = "per-model limits unavailable"
+		h.build = func(context.Context) (collect.Snapshot, error) {
+			return collect.Snapshot{
+				Accounts: []collect.AccountView{
+					{PublicAccount: claude.PublicAccount{Alias: "ai5"}, Usage: &ai5Headers},
+					{PublicAccount: claude.PublicAccount{Alias: "ai9", IsActive: true}, Usage: &ai9Headers},
+				},
+			}, nil
+		}
+		h.stopped = func(context.Context, int) ([]work.StoppedItem, error) { return stoppedFable, nil }
+
+		if code := h.run("resume", "--json"); code != 0 {
+			t.Fatalf("exit %d: %s", code, h.err.String())
+		}
+		items := h.json(t)["items"].([]any)
+		for _, raw := range items {
+			item := raw.(map[string]any)
+			readiness := item["readiness"].(map[string]any)
+			if readiness["ready"] != false || readiness["hard"] != nil || readiness["warning"] != "cannot verify claude-fable-5-2 quota; per-model limits are unavailable" {
+				t.Errorf("degraded header-probe item falsely marked servable: %v", item)
+			}
+		}
+	})
+}
+
 // --- inspect --------------------------------------------------------------------------
 
 func detailFixture() *work.Detail {
