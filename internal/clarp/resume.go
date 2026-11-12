@@ -114,14 +114,9 @@ func (s *Service) PausedClarpAgents(ctx context.Context) ([]work.StoppedItem, er
 
 // ParkedClarpAgents lists Clarp agents parked waiting for an account with quota.
 //
-// When a Claude turn hits a limit, Clarp parks it and retries an account check
-// every minute. The check demands that ONE account serve every parked agent's
-// model at once, so a single agent wanting a model nobody has quota for keeps
-// every other parked agent waiting, including ones whose model is available.
-//
-// Detecting this matters because nothing else names it: the runtime only logs
-// "No verified account", and the agent that cannot be served is not necessarily
-// the agent you are waiting on.
+// A wait is current only while it is the agent's latest state. A resumed turn
+// need not finish before it stops being parked. The state id breaks ties when
+// the wait and the resumed state were recorded in the same millisecond.
 func (s *Service) ParkedClarpAgents(ctx context.Context, windowDays int) ([]work.StoppedItem, error) {
 	if !stateExists(s.StatePath) {
 		return nil, nil
@@ -131,21 +126,16 @@ func (s *Service) ParkedClarpAgents(ctx context.Context, windowDays int) ([]work
 		cutoff = s.cutoffMillis(windowDays)
 	}
 	query := `
-        WITH parked AS (
-            SELECT agent_id, MAX(ts) AS ts FROM state_log
-             WHERE json_extract(detail, '$.account_recovery') = 'waiting'
-               AND ts >= ?
-             GROUP BY agent_id),
-        finished AS (
-            SELECT agent_id, MAX(ts) AS ok_ts FROM state_log
-             WHERE kind = 'done' GROUP BY agent_id)
         SELECT a.session, a.persona, a.backend, a.cwd, a.model, p.ts,
                ` + lastSaid + `
-          FROM parked p
-          JOIN agents a USING (agent_id)
-          LEFT JOIN finished f USING (agent_id)
+          FROM agents a
+          JOIN state_log p ON p.state_id = (
+              SELECT state_id FROM state_log
+               WHERE agent_id = a.agent_id
+               ORDER BY ts DESC, state_id DESC LIMIT 1)
          WHERE a.deleted_at IS NULL AND a.archived_at IS NULL
-           AND (f.ok_ts IS NULL OR f.ok_ts < p.ts)
+           AND p.ts >= ?
+           AND json_extract(p.detail, '$.account_recovery') = 'waiting'
     `
 	items, err := s.queryAgents(ctx, "waiting_for_account", query, func(rows *sql.Rows, r *agentRow) error {
 		return rows.Scan(&r.session, &r.persona, &r.backend, &r.cwd, &r.model, &r.ts, &r.said)

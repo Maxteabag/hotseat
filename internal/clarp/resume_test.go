@@ -368,6 +368,35 @@ func TestAParkedAgentThatHasSinceRunIsNotListed(t *testing.T) {
 	}
 }
 
+func TestParkedAccountStatusFollowsLatestState(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, detail string
+		sameTime, listed   bool
+	}{
+		{"resumed before completion", "thinking", `{ "phase": "responding" }`, false, false},
+		{"resumed in same millisecond", "thinking", "{}", true, false},
+		{"still waiting", "thinking", `{ "account_recovery": "waiting" }`, false, true},
+		{"parked again", "thinking", `{ "account_recovery": "waiting" }`, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := resumeFixture(t)
+			f.agent("a1", "domi", "claude", nil, nil)
+			ts := int64((nowSeconds() - 600) * 1000)
+			f.exec("INSERT INTO state_log (agent_id, ts, kind, detail) VALUES (?,?,?,?)",
+				"a1", ts, "thinking", `{ "account_recovery": "waiting" }`)
+			if !tc.sameTime {
+				ts++
+			}
+			f.exec("INSERT INTO state_log (agent_id, ts, kind, detail) VALUES (?,?,?,?)",
+				"a1", ts, tc.kind, tc.detail)
+			found := items(t)(f.svc.ParkedClarpAgents(context.Background(), 7))
+			if (len(found) == 1) != tc.listed {
+				t.Fatalf("listed=%v, want %v: %+v", len(found) == 1, tc.listed, found)
+			}
+		})
+	}
+}
+
 func TestAPausedAgentIsFound(t *testing.T) {
 	f := resumeFixture(t)
 	f.agent("a1", "domi", "claude", nil, nil)
