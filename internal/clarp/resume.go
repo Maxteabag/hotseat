@@ -36,11 +36,29 @@ import (
 // promptTimeout bounds `clarp-admin prompt`.
 const promptTimeout = 60 * time.Second
 
-// lastSaid is the last thing an agent said, for the listing.
-const lastSaid = `(SELECT m.text FROM messages m
-                  WHERE m.agent_id = a.agent_id AND m.role = 'assistant'
-                    AND length(trim(coalesce(m.text,''))) > 0
-                  ORDER BY m.seq DESC LIMIT 1) AS said`
+// saidTail is how many of an agent's newest messages are looked at before its
+// whole history.
+const saidTail = "64"
+
+// lastSaid is the last thing an agent said, for the listing: its assistant
+// message with the highest sequence number that has any text.
+//
+// That message is nearly always among the agent's newest few, which an index
+// finds without touching the message bodies. Only when those hold no assistant
+// text is the whole history searched; doing that for every listed agent read
+// each one's entire conversation on every listing.
+const lastSaid = `COALESCE(
+               (SELECT m.text FROM messages m
+                 WHERE m.rowid IN (SELECT r.rowid FROM messages r
+                                    WHERE r.agent_id = a.agent_id
+                                    ORDER BY r.seq DESC LIMIT ` + saidTail + `)
+                   AND m.role = 'assistant'
+                   AND length(trim(coalesce(m.text,''))) > 0
+                 ORDER BY m.seq DESC LIMIT 1),
+               (SELECT m.text FROM messages m
+                 WHERE m.agent_id = a.agent_id AND m.role = 'assistant'
+                   AND length(trim(coalesce(m.text,''))) > 0
+                 ORDER BY m.seq DESC LIMIT 1)) AS said`
 
 func resumeErr(format string, args ...any) error {
 	return &work.ResumeError{Msg: fmt.Sprintf(format, args...)}
@@ -91,10 +109,7 @@ func (s *Service) PausedClarpAgents(ctx context.Context) ([]work.StoppedItem, er
 	}
 	const query = `
         SELECT a.session, a.persona, a.backend, a.cwd,
-               (SELECT m.text FROM messages m
-                 WHERE m.agent_id = a.agent_id AND m.role = 'assistant'
-                   AND length(trim(coalesce(m.text,''))) > 0
-                 ORDER BY m.seq DESC LIMIT 1) AS said,
+               ` + lastSaid + `,
                (SELECT COUNT(*) FROM queued_turns q
                  WHERE q.agent_id = a.agent_id AND q.status = 'queued') AS pending,
                (SELECT MIN(q.enqueued_at) FROM queued_turns q
@@ -146,6 +161,36 @@ func (s *Service) ParkedClarpAgents(ctx context.Context, windowDays int) ([]work
 	return items, nil
 }
 
+// stoppedAgentsQuery finds, per live agent, the newest state that is either a
+// finished turn or a usage-limit stop, and keeps the agent when that state is the
+// stop. A turn finished in the same millisecond as the stop counts as following
+// it.
+//
+// Clarp's state log holds every thinking and tool state of every agent and is
+// indexed by agent and time only. Walking each agent's log newest first ends at
+// its last finished turn, a few rows in; grouping the whole log by agent, as this
+// query once did, read the entire table twice on every listing.
+//
+// The CASE keeps json_extract away from the states of other kinds.
+const stoppedAgentsQuery = `
+        SELECT a.session, a.persona, a.backend, a.cwd, s.ts,
+               ` + lastSaid + `
+          FROM agents a
+          JOIN state_log s ON s.state_id = (
+              SELECT state_id FROM state_log
+               WHERE agent_id = a.agent_id
+                 AND (? IS NULL OR ts >= ?)
+                 AND (kind = 'done'
+                      OR CASE WHEN kind IN ('interrupted', 'error')
+                              THEN json_extract(detail, '$.reason') END = 'usage_limit')
+               ORDER BY ts DESC LIMIT 1)
+         WHERE a.deleted_at IS NULL AND a.archived_at IS NULL
+           AND s.kind != 'done'
+           AND NOT EXISTS (SELECT 1 FROM state_log d
+                            WHERE d.agent_id = a.agent_id AND d.ts = s.ts AND d.kind = 'done')
+         ORDER BY s.ts DESC
+    `
+
 // StoppedClarpAgents lists Clarp agents whose last usage-limit stop has not been
 // followed by a turn, most recent stop first.
 func (s *Service) StoppedClarpAgents(ctx context.Context, windowDays int) ([]work.StoppedItem, error) {
@@ -156,30 +201,7 @@ func (s *Service) StoppedClarpAgents(ctx context.Context, windowDays int) ([]wor
 	if windowDays != 0 {
 		cutoff = s.cutoffMillis(windowDays)
 	}
-	const query = `
-        WITH stopped AS (
-            SELECT agent_id, MAX(ts) AS fail_ts
-              FROM state_log
-             WHERE kind IN ('interrupted', 'error')
-               AND json_extract(detail, '$.reason') = 'usage_limit'
-             GROUP BY agent_id),
-        finished AS (
-            SELECT agent_id, MAX(ts) AS ok_ts FROM state_log
-             WHERE kind = 'done' GROUP BY agent_id)
-        SELECT a.session, a.persona, a.backend, a.cwd, s.fail_ts,
-               (SELECT m.text FROM messages m
-                 WHERE m.agent_id = a.agent_id AND m.role = 'assistant'
-                   AND length(trim(coalesce(m.text,''))) > 0
-                 ORDER BY m.seq DESC LIMIT 1) AS said
-          FROM stopped s
-          JOIN agents a USING (agent_id)
-          LEFT JOIN finished f USING (agent_id)
-         WHERE a.deleted_at IS NULL AND a.archived_at IS NULL
-           AND (f.ok_ts IS NULL OR f.ok_ts < s.fail_ts)
-           AND (? IS NULL OR s.fail_ts >= ?)
-         ORDER BY s.fail_ts DESC
-    `
-	items, err := s.queryAgents(ctx, "usage_limit", query, func(rows *sql.Rows, r *agentRow) error {
+	items, err := s.queryAgents(ctx, "usage_limit", stoppedAgentsQuery, func(rows *sql.Rows, r *agentRow) error {
 		return rows.Scan(&r.session, &r.persona, &r.backend, &r.cwd, &r.ts, &r.said)
 	}, cutoff, cutoff)
 	if err != nil {
@@ -241,7 +263,7 @@ func (s *Service) queryAgents(ctx context.Context, cause, query string,
 //     earlier interruption reason;
 //  5. the whole list is sorted with work.SortByPriority.
 func (s *Service) Stopped(ctx context.Context, windowDays int, includePaused bool) ([]work.StoppedItem, error) {
-	items := work.StoppedNativeSessions(s.ProjectsDir, windowDays, s.now())
+	items := work.ScanStopped(s.ScanCache, s.ProjectsDir, windowDays, s.now())
 	stopped, err := s.StoppedClarpAgents(ctx, windowDays)
 	if err != nil {
 		return nil, err

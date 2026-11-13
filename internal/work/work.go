@@ -120,6 +120,9 @@ type ActResult struct {
 type Service struct {
 	// ProjectsDir holds Claude Code's native transcripts.
 	ProjectsDir string
+	// ScanCache remembers the stopped-work scan between listings; nil reads
+	// every recent transcript each time.
+	ScanCache *ScanCache
 	// CodexHome holds Codex's state_*.sqlite databases.
 	CodexHome string
 	// ProcRoot is /proc, or a fake tree in tests.
@@ -145,6 +148,7 @@ type Service struct {
 func New(codex CodexSessions, launcher Launcher) *Service {
 	return &Service{
 		ProjectsDir: DefaultProjectsDir(),
+		ScanCache:   DefaultScanCache(),
 		CodexHome:   DefaultCodexHome(),
 		ProcRoot:    "/proc",
 		Codex:       codex,

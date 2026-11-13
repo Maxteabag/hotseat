@@ -2,7 +2,6 @@ package work
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -101,48 +100,13 @@ func LastEntries(path string, keep int) []Entry {
 	if keep <= 0 {
 		return nil
 	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return nil
-	}
-	pos := info.Size()
-	var pending []byte
 	var entries []Entry
-	for pos > 0 {
-		size := int64(64 * 1024)
-		if pos < size {
-			size = pos
-		}
-		pos -= size
-		block := make([]byte, int(size))
-		if _, err := file.ReadAt(block, pos); err != nil {
-			return nil
-		}
-		block = append(block, pending...)
-		end := len(block)
-		for {
-			i := bytes.LastIndexByte(block[:end], '\n')
-			if i < 0 {
-				break
-			}
-			if entry, ok := parseLine(block[i+1 : end]); ok {
-				entries = append(entries, entry)
-				if len(entries) == keep {
-					slices.Reverse(entries)
-					return entries
-				}
-			}
-			end = i
-		}
-		pending = block[:end]
-	}
-	if entry, ok := parseLine(pending); ok {
+	read := scanBack(path, func(entry Entry) bool {
 		entries = append(entries, entry)
+		return len(entries) < keep
+	})
+	if !read {
+		return nil
 	}
 	slices.Reverse(entries)
 	return entries
@@ -224,74 +188,7 @@ func epochSeconds(t time.Time) float64 {
 // StoppedNativeSessions lists native sessions whose transcript ends on a
 // usage-limit error, most recent first.
 func StoppedNativeSessions(projectsDir string, windowDays int, now time.Time) []StoppedItem {
-	if info, err := os.Stat(projectsDir); err != nil || !info.IsDir() {
-		return nil
-	}
-	var cutoff float64
-	if windowDays != 0 {
-		cutoff = epochSeconds(now) - float64(windowDays)*86400
-	}
-	var found []StoppedItem
-	for _, transcript := range transcripts(projectsDir) {
-		info, err := os.Stat(transcript)
-		if err != nil {
-			continue
-		}
-		modified := epochSeconds(info.ModTime())
-		if modified < cutoff {
-			continue
-		}
-		entries := LastEntries(transcript, tailKeep)
-		if len(entries) == 0 {
-			continue
-		}
-		// Taken from the tail already in hand: re-reading a transcript that can run
-		// to tens of megabytes just for one line would not be worth it.
-		said := ""
-		for i := len(entries) - 1; i >= 0; i-- {
-			e := entries[i]
-			if e.str("type") == "assistant" && !truthy(e["isApiErrorMessage"]) && strings.TrimSpace(EntryText(e)) != "" {
-				said = EntryText(e)
-				break
-			}
-		}
-		// Only the final assistant turn counts. An earlier limit that was worked
-		// through is history, not something waiting to be continued.
-		last := lastTurn(entries)
-		if last == nil || !truthy(last["isApiErrorMessage"]) {
-			continue
-		}
-		message, _ := last["message"].(map[string]any)
-		text, ok := message["content"].(string)
-		if !ok {
-			if encoded, err := json.Marshal(message["content"]); err == nil {
-				text = string(encoded)
-			}
-		}
-		if !limitText.MatchString(text) {
-			continue
-		}
-		cwd := last.str("cwd")
-		if cwd == "" {
-			cwd = DecodeProjectDir(filepath.Base(filepath.Dir(transcript)))
-		}
-		id := stem(transcript)
-		found = append(found, StoppedItem{
-			Kind:        "native",
-			Cause:       "usage_limit",
-			Pending:     0,
-			ID:          id,
-			Name:        shortName(id),
-			Backend:     "claude",
-			CWD:         cwd,
-			LastMessage: Trim(said, 150),
-			StoppedAt:   modified,
-		})
-	}
-	slices.SortStableFunc(found, func(a, b StoppedItem) int {
-		return compareFloatDesc(a.StoppedAt, b.StoppedAt)
-	})
-	return found
+	return ScanStopped(nil, projectsDir, windowDays, now)
 }
 
 // lastTurn is the final assistant or user entry of a tail, or nil.
@@ -531,7 +428,7 @@ func ptr(s string) *string { return &s }
 // priority. includePaused is accepted for parity with the Python signature; the
 // native source has no paused queues, so it changes nothing.
 func (s *Service) Stopped(windowDays int, includePaused bool) []StoppedItem {
-	items := StoppedNativeSessions(s.ProjectsDir, windowDays, s.now())
+	items := ScanStopped(s.ScanCache, s.ProjectsDir, windowDays, s.now())
 	SortByPriority(items)
 	return items
 }

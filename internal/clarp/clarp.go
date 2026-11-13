@@ -76,6 +76,9 @@ type Service struct {
 	StatePath string
 	// ProjectsDir holds Claude Code's native transcripts, merged into Stopped.
 	ProjectsDir string
+	// ScanCache remembers the native stopped-work scan between listings; nil
+	// reads every recent transcript each time.
+	ScanCache *work.ScanCache
 	// ProcRoot is /proc, or a fake tree in tests.
 	ProcRoot string
 	// Run executes clarp-admin and ps; nil means the real commands.
@@ -113,6 +116,7 @@ func New() *Service {
 	return &Service{
 		StatePath:   DefaultStatePath(),
 		ProjectsDir: work.DefaultProjectsDir(),
+		ScanCache:   work.DefaultScanCache(),
 		ProcRoot:    "/proc",
 	}
 }
