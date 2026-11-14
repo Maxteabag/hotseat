@@ -210,6 +210,17 @@ func (c *Cache) Read(ctx context.Context, token string) (Result, error) {
 	if rec.Until > now {
 		return cached(rec, now)
 	}
+	unlock, err := lockRead(ctx, root+".locks", Filename(token))
+	if err != nil {
+		return Result{}, err
+	}
+	defer unlock()
+	// Another process may have refreshed or backed off while we waited.
+	now = c.now()
+	rec = load(path)
+	if rec.Until > now {
+		return cached(rec, now)
+	}
 	fetch := c.Fetch
 	if fetch == nil {
 		fetch = ForToken
@@ -231,7 +242,7 @@ func (c *Cache) Read(ctx context.Context, token string) (Result, error) {
 		if usageErr.RetryAfter != nil && *usageErr.RetryAfter > delay {
 			delay = *usageErr.RetryAfter
 		}
-		rec.Until = now + delay
+		rec.Until = c.now() + delay
 		rec.Failures = float64(failures)
 		store(path, rec, c.Warn)
 		return cached(rec, now)

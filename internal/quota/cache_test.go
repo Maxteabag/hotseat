@@ -358,3 +358,19 @@ func TestZeroValueCacheUsesForToken(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestRetryAfterStartsWhenResponseArrives(t *testing.T) {
+	h := newHarness(t, &fakeFetch{})
+	calls := 0
+	h.cache.Fetch = func(context.Context, string) (Summary, error) {
+		calls++
+		h.now = 130
+		return Summary{}, &UsageError{Message: "usage endpoint returned 429", RetryAfter: ptr(120)}
+	}
+	h.mustFail(t, "429")
+	h.now = 235
+	h.mustFail(t, "429")
+	if calls != 1 {
+		t.Fatalf("request retried before response Retry-After elapsed: %d calls", calls)
+	}
+}

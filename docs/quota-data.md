@@ -13,7 +13,12 @@ authentication failure. An HTTP 429 from the Claude usage endpoint is a failed,
 throttled lookup, not evidence that the user's allowance is exhausted. The TUI
 caches successful quota reads for 60 seconds and increases its cooldown after
 repeated 429 responses, respecting Retry-After. Last good data retains its real
-read timestamp and is explicitly marked cached.
+read timestamp and is explicitly marked cached. All default collection paths share this
+persisted cooldown. Separate processes take a context-cancellable per-token OS
+lock and re-read the cache after admission, so simultaneous UI, selector and
+Janitor reads cannot each start the same quota request. Lock contention never
+authorizes bypassing Retry-After. This reduces avoidable throttling; upstream
+limits can still occur and remain visible as unverified status, not zero quota.
 
 Stored credential profiles are not unique account identities. The TUI groups only
 matching provider, email and workspace triples, prefers a successful profile for

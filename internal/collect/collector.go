@@ -180,7 +180,11 @@ func (c *Collector) usage(ctx context.Context, token string) (quota.Summary, err
 	if c.Usage != nil {
 		return c.Usage(ctx, token)
 	}
-	return quota.ForToken(ctx, token)
+	result, err := quota.Read(ctx, token)
+	if result.Warning != "" {
+		result.Summary.Degraded = result.Warning
+	}
+	return result.Summary, err
 }
 
 func (c *Collector) headerProbe(ctx context.Context, token string) (quota.Headers, error) {
